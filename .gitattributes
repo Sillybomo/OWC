@@ -1,0 +1,7 @@
+# @author bomo
+# Android shell scripts must stay LF; CRLF will break execution on device
+* text=auto eol=lf
+*.sh text eol=lf
+*.prop text eol=lf
+*.txt text eol=lf
+*.json text eol=lf
