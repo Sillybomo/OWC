@@ -12,9 +12,11 @@
 
 ## 这是什么
 
-一加 / OPPO / realme（ColorOS / OxygenOS）的"亮屏降速充电"是系统的**有意行为**：亮屏时充电内核写入降流档，功率直接砍半以上（实测 PLZ110：熄屏 78W → 亮屏 22W）。
+一加 / OPPO / realme（ColorOS / OxygenOS）的"亮屏降速充电"是系统的**有意行为**：亮屏时充电内核写入降流档，功率直接砍半以上（实测一加 15T：熄屏 78W → 亮屏 22W）。
 
-OWC（OP WarpCharge）把这套限流完整解开，并提供**控制中心磁贴**随时热切换：
+OWC（OP WarpCharge）按通用模块设计，把这套限流完整解开，并提供**控制中心磁贴**随时热切换：
+
+> ⚠️ **目前仅一加 15T 实测确认。其他机型请自测，适配随缘更新。**
 
 | 场景 | 磁贴关闭 | 磁贴开启 |
 | --- | --- | --- |
@@ -87,13 +89,20 @@ adb install owc-app-debug.apk
 
 ## 兼容性
 
-| 项目 | 已验证 | 说明 |
-| --- | --- | --- |
-| OnePlus PLZ110 · ColorOS 16 · Android 16 | ✅ 完整实测 | 双电芯 SuperVOOC |
-| 其他 ColorOS/OxygenOS 机型 | ⚠️ 未验证 | 节点路径因机型/系统版本可能不同 |
-| 非 OPlus 系统 | ❌ | 依赖 oplus_chg / horae 私有节点 |
+> **本项目按通用模块设计，但目前仅在一加 15T 上实测确认可用。**
+> 其他机型理论兼容（依赖 oplus_chg / horae 通用节点），但节点路径与充电策略
+> 因机型/系统版本而异，**请自行测试**，效果随缘。作者仅随缘更新适配，
+> 欢迎提交 PR / issue 反馈其他机型的实测情况（附 `warp_charge.log` 与机型信息）。
 
-欢迎带 `warp_charge.log` + 机型信息提 issue 反馈适配情况。
+| 项目 | 状态 | 说明 |
+| --- | --- | --- |
+| 一加 15T · ColorOS 16 · Android 16 | ✅ **唯一实测** | 双电芯 SuperVOOC，亮屏 22W → 78W |
+| 其他一加 / OPPO / realme（ColorOS 系） | ⚠️ 自测 | 理论兼容，随缘适配 |
+| 非 OPlus 系统 | ❌ | 依赖 oplus_chg / horae 私有节点，无法使用 |
+
+**自测要点**：确认 `/sys/class/oplus_chg/battery/cool_down`、
+`/proc/shell-temp`、`/sys/class/thermal/thermal_zone*/emul_temp` 节点存在，
+再看 `warp_charge.log` 中激活后电流是否上升。
 
 ## 项目结构
 

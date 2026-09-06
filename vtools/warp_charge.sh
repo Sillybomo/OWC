@@ -129,7 +129,7 @@ init_warp_charge() {
 }
 
 # @author bomo v1.3: 亮屏降流对抗。
-# 实测（2026-09-06 PLZ110/ColorOS16）：ColorOS 亮屏时写 cool_down=5（降流档，
+# 实测（2026-09-06 一加 15T/ColorOS16）：ColorOS 亮屏时写 cool_down=5（降流档，
 # 22-33W），此为"亮屏慢充"的直接开关；写 0 后 1 秒内恢复满功率（79W）。
 # 系统会在亮屏策略刷新时重写 5，守护每轮对抗。restore 时写 5 交还控制权。
 COOL_DOWN_NODE=/sys/class/oplus_chg/battery/cool_down
