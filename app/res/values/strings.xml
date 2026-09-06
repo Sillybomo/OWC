@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- @author bomo -->
+    <string name="app_name">OWC亮屏快充</string>
+    <string name="tile_label">亮屏快充</string>
+</resources>

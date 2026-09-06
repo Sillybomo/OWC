@@ -1,0 +1,464 @@
+# 游戏黑名单 — 电池温度伪装
+# 当前台运行的应用包名命中下列任一关键词时，温度伪装自动暂停
+# 支持子串匹配（不完整包名），每行一个完整包名，# 开头为注释
+
+# ====== 腾讯系 / Level Infinite ======
+com.tencent.tmgp.sgame
+com.tencent.tmgp.pubgmhd
+com.tencent.tmgp.cf
+com.tencent.tmgp.cod
+com.tencent.tmgp.codev
+com.tencent.tmgp.dfjs
+com.tencent.tmgp.dfm
+com.tencent.tmgp.djsy
+com.tencent.tmgp.dnf
+com.tencent.tmgp.dwrg
+com.tencent.tmgp.ffom
+com.tencent.tmgp.gnyx
+com.tencent.tmgp.kr.codm
+com.tencent.tmgp.nz
+com.tencent.tmgp.speedmobile
+com.tencent.tmgp.sskgame
+com.tencent.tmgp.wuxia
+com.tencent.tmgp.yys.zqb
+com.tencent.tmgp.WePop
+com.tencent.tmgp.bh3
+com.tencent.tmgp.supercell.boombeach
+com.tencent.tmgp.supercell.clash
+com.tencent.KiHan
+com.tencent.hhw
+com.tencent.ig
+com.tencent.jkchess
+com.tencent.letsgo
+com.tencent.lolm
+com.tencent.mf.uam
+com.tencent.nba2kx
+com.tencent.nfsonline
+com.tencent.ngr
+com.tencent.nikke
+com.tencent.nrc
+com.tencent.toaa
+com.levelinfinite.sgameGlobal
+com.pubg
+com.pubg.newstate
+com.rekoo.pubgm
+com.vng.pubgmobile
+
+# ====== 网易 ======
+com.netease.AVALON
+com.netease.EVE
+com.netease.aceracer
+com.netease.allstar
+com.netease.dfjs
+com.netease.dunkcd
+com.netease.dwrg
+com.netease.eve.en
+com.netease.g78na
+com.netease.g93na
+com.netease.h73hmt
+com.netease.h75na
+com.netease.hyxd
+com.netease.idv
+com.netease.jddsaef
+com.netease.ko
+com.netease.l22
+com.netease.lglr
+com.netease.ma84
+com.netease.moba
+com.netease.mrzh
+com.netease.newspike
+com.netease.nshm
+com.netease.nshmhmt
+com.netease.onmyoji
+com.netease.party
+com.netease.pes
+com.netease.qrsj
+com.netease.race
+com.netease.sky
+com.netease.soulofhunter
+com.netease.tank
+com.netease.tj
+com.netease.tom
+com.netease.wotb
+com.netease.wyclx
+com.netease.x19
+com.netease.yhtj
+com.netease.yyslscn
+com.netease.yzs
+
+# ====== 米哈游 / HoYoverse ======
+com.miHoYo.GenshinImpact
+com.miHoYo.Nap
+com.miHoYo.Yuanshen
+com.miHoYo.bh3
+com.miHoYo.enterprise.NGHSoD
+com.miHoYo.hkrpg
+com.miHoYo.ys
+com.miHoYo.zenless
+com.HoYoverse.hkrpgoversea
+
+# ====== 库洛游戏 ======
+com.kurogame.aki
+com.kurogame.haru
+com.kurogame.mingchao
+com.kurogame.wutheringwaves.global
+
+# ====== 鹰角 / Hypergryph ======
+com.hypergryph.arknights
+com.hypergryph.endfield
+com.hypergryph.exastris
+com.gryphline.endfield.gp
+com.gryphline.exastris.gp
+
+# ====== YoStar ======
+com.YoStarEN.Arknights
+com.YoStarEN.MahjongSoul
+com.YoStarEN.StellaSora
+com.YoStarJP.MajSoul
+com.YostarJP.BlueArchive
+
+# ====== Bilibili ======
+com.bilibili.azurlane
+com.bilibili.deadcells.mobile
+com.bilibili.fatego
+com.bilibili.heaven
+com.bilibili.priconne
+com.bilibili.star.bili
+com.bilibili.warmsnow
+com.biligamekr.aggp
+
+# ====== Supercell ======
+supercell.brawlstars
+supercell.clashofclans
+supercell.squad
+com.supercell.boombeach
+com.supercell.clashroyale
+com.supercell.moco
+
+# ====== 心动网络 / XD ======
+com.xd.TLglobal
+com.xd.dxlzz.taptap
+com.xd.rotaeno.googleplay
+com.xd.rotaeno.tapcn
+com.xd.terraria
+com.xd.xdt
+com.xindong.torchlight
+xd.sce.promotion
+
+# ====== SEGA / Colorful Palette ======
+com.sega.ColorfulStage.en
+com.sega.pjsekai
+jp.co.craftegg.band
+
+# ====== Bandai Namco ======
+com.bandainamcoent.idolmaster_gakuen
+com.bandainamcoent.imas_millionlive_theaterdays
+com.bandainamcoent.sao
+com.bandainamcoent.shinycolorsprism
+com.bandainamcogames.dbzdokkanww
+jp.co.bandainamcoent.BNEI0242
+
+# ====== Bushiroad ======
+com.bushiroad.d4dj
+com.bushiroad.lovelive.schoolidolfestival2
+
+# ====== Nexon ======
+com.nexon.bluearchive
+com.nexon.kartdrift
+com.nexon.mdnf
+com.nexon.mod
+
+# ====== 完美世界 / PW ======
+com.pwrd.hotta.laohu
+com.pwrd.huanta
+com.pwrd.p5x
+com.pwrd.persona5x.laohu
+
+# ====== 英雄游戏 ======
+com.herogame.gplay.punishing.grayraven.tw
+gplay.punishing.grayraven
+
+# ====== 莉莉丝 ======
+com.lilithgames.hgame.cn
+com.lilithgames.solarland.android.cn
+
+# ====== 散爆 / Sunborn ======
+com.Sunborn.SnqxExilium
+
+# ====== 叠纸 ======
+com.papegames.infinitynikki
+com.infoldgames.infinitynikkien
+
+# ====== 西山居 ======
+com.seasun.jx3
+com.seasun.snowbreak.google
+
+# ====== 蓝港 ======
+com.linekong.grandmirage
+
+# ====== 蛮啾 ======
+com.megaxus.yostar.manjuu
+
+# ====== 热脉 ======
+com.tap4fun.brutalage
+
+# ====== EA ======
+com.ea.game.pvz2_row
+com.ea.games.r3
+
+# ====== Epic Games ======
+com.epicgames.fortnite
+
+# ====== Activision / Blizzard ======
+com.activision.callofduty.shooter
+com.activision.callofduty.warzone
+com.blizzard.diablo.immortal
+com.blizzard.wtcg.hearthstone
+
+# ====== Riot Games ======
+com.riotgames.league.teamfighttactics
+com.riotgames.league.wildrift
+
+# ====== Ubisoft ======
+com.ubisoft.rainbowsixmobile.r6.fps.pvp.shooter
+
+# ====== Rockstar ======
+com.rockstargames.rdr
+
+# ====== Valve ======
+com.valvesoftware.cswgsm
+com.valvesoftware.source
+
+# ====== Behaviour ======
+com.bhvr.deadbydaylight
+
+# ====== Digital Extremes ======
+com.digitalextremes.warframemobile
+
+# ====== Krafton ======
+com.krafton.dndm
+
+# ====== Niantic ======
+com.nianticlabs.monsterhunter
+com.nianticproject.ingress
+
+# ====== Wargaming ======
+net.wargaming.wot.blitz
+
+# ====== Gaijin ======
+com.gaijingames.wtm
+
+# ====== Cygames ======
+jp.co.cygames.princessconnectredive
+
+# ====== Konami ======
+jp.konami.masterduel
+jp.konami.pesam
+
+# ====== Crunchyroll ======
+com.crunchyroll.gv.shogunshowdown.game
+com.crunchyroll.princessconnectredive
+
+# ====== Garena ======
+com.garena.game.codm
+com.garena.game.df
+com.garena.game.kgtw
+com.garena.game.kgvn
+com.garena.game.nfsm
+
+# ====== Gameloft ======
+com.gameloft.android.ANMP.GloftA9HM
+
+# ====== Moonton ======
+com.mobile.legends
+
+# ====== Mojang ======
+com.mojang.minecraftpe
+
+# ====== Roblox ======
+com.roblox.client
+
+# ====== Stardew Valley ======
+com.chucklefish.stardewvalley
+
+# ====== Terraria ======
+com.and.games505.Terraria
+
+# ====== Dead Cells ======
+com.playdigious.deadcells.mobile
+
+# ====== Albion Online ======
+com.albiononline
+
+# ====== Thatgamecompany / Sky ======
+com.tgc.sky.android
+
+# ====== Garena Free Fire ======
+com.dts.freefire
+
+# ====== Standoff 2 ======
+com.axlebolt.standoff2
+
+# ====== Modern Warships / Modern Warfront ======
+com.Shooter.ModernWarships
+com.Shooter.ModernWarfront
+
+# ====== 其他重度游戏 ======
+com.proximabeta.nikke
+com.proxima.dfm
+com.ProjectMoon.LimbusCompany
+com.RoamingStar.BlueArchive
+com.neowizgames.game.browndust2
+com.zlongame.mhmnz
+com.ztgame.bob
+com.ztgame.yyzy
+com.t2ksports.nba2k20and
+com.modx.daluandou
+com.jumpw.mobile300
+com.hottapkgs.hotta
+com.hermes.h1game
+com.hermes.j1game
+com.hermes.mk
+com.heavenburnsred
+com.gbits.funnyfighter.android.overseas
+com.dragonli.projectsnow
+com.dgames.g15002002
+com.denachina.g13002010
+com.komoe.kmumamusumegp
+com.yostar.majsoul
+com.miraclegames.farlight84
+com.soulgamechst.majsoul
+com.kiloo.subwaysurf.gw
+com.madfingergames.legends
+com.niobe.miniworld
+com.playmini.miniworld
+minitech.miniworld
+com.miniworldgame.creata.vn
+com.GlobalSoFunny.Sausage
+com.sofunny.Sausage
+com.bf.sgs.hdexp.bd
+com.blade.bd
+com.aligames.kuang.kybc
+com.dfjz.moba
+com.moba.smoba
+com.garena.xl
+com.garena.game.lol
+
+# ====== 独立/中小规模游戏 ======
+com.ChillyRoom.DungeonShooter
+com.Flanne.MinutesTillDawn.roguelike.shooting.gp
+com.EtherGaming.PocketRogues
+com.BlackSaltGames.DREDGE
+com.shatteredpixel.shatteredpixeldungeon
+com.littleleogames.astreasixsidedoracles
+com.TechTreeGames.TheTower
+com.the10tons.dysmantle
+com.tipsworks.android.pascalswager
+com.tipsworks.pascalswager
+com.ShinyShoe.MonsterTrain.mtap
+com.Roboatino.ShogunShowdown
+com.bscotch.crashlands2
+com.nanostudios.games.twenty.minutes
+brownmonster.app.game.rushrally3
+com.savysoda.pss2.android
+com.oninou.FAPI
+com.GameCoaster.ProtectDungeon
+com.MOBGames.PoppyMobileChap1
+com.GentleManiac.HorizonWalker
+com.YiMoXuan.XYZJF
+com.idreamsky.klbqm
+com.guigugame.guigubahuang
+com.fantablade.icey
+com.actgames.bbee
+com.AlfaBravo.Combat
+com.CarXTech.highWay
+com.ZeroCastleGameStudio.StrikeBusterPrototype
+com.ZeroCastleGameStudioINTL.StrikeBusterPrototype
+com.shenlan.m.reverse1999
+com.bingkolo.kleins.cn
+com.pinkcore.tkfm
+com.humo.yqqsqz.yw
+com.hg.lbw
+com.hg.fkns
+com.hottagames.yh
+com.leiting.wf
+com.yinhan.hunter
+com.yongshi.tenojo
+com.zhanhuo.mw
+com.shangyoo.neon
+com.bairimeng.dmmdzz
+com.xzy.styx
+com.xzy.xgst
+com.xjskp.tv.hnsc
+com.zy.wqmt.cn
+com.je.skgame
+com.longe.allstarhmt
+com.sy.dldlhsdj
+com.h73.jhqyna
+com.halo.windf.hero
+com.guyou.deadstrike
+com.pi.czrxdfirst
+com.jacksparrow.jpmajiang
+com.tungsten.fcl
+com.movtery.zalithlauncher
+net.kdt.pojavlaunch
+com.unity.mmd
+com.denchi.vtubestudio
+com.cnvcs.xiangqi
+seayoo.ggd
+com.ignm.raspberrymash.jp
+com.r2games.myhero.bilibili
+com.minidragon.idlefantasy
+com.trampolinetales.lbal
+Nekootan.kfkj
+age.of.civilizations2.jakowski.lukasz
+
+# ====== 音游 / 节奏游戏 ======
+com.prpr.musedash
+com.ilongyuan.cytus2
+com.rayark.cytus2
+com.ilongyuan.implosion
+com.rayark.implosion
+me.mugzone.emiria
+me.tigerhix.cytoid
+moe.low.arc
+sh.ppy.osulazer
+org.flos.phira
+
+# ====== 音游偶像 ======
+com.LanPiaoPiao.PlantsVsZombiesRH
+
+# ====== 国际服/外服代理 ======
+jp.co.bandainamcoent.BNEI0242
+tw.sonet.allbw
+tw.sonet.princessconnect
+com.YoStarJP.MajSoul
+com.YostarJP.BlueArchive
+
+# ====== GMS 版标识 ======
+com.activision.callofduty.warzone
+com.digitalextremes.warframemobile
+com.epicgames.fortnite
+com.garena.game.nfsm
+
+# ====== 其他 ======
+org.maxbytes.lfs
+
+# ====== asoul 名单补充 (2026-08-22, 来源 github.com/nakixii/Magisk_AsoulOpt) ======
+ahf.dummynation
+com.HoYoverse.Nap
+com.PanikArcade.CloverPit
+com.bladetw.bd
+com.cytx.td
+com.feimo.astralpartyjpn
+com.hottagames.nte
+com.kingnet.gundam
+com.leiting.daluandou
+com.morizero.milthm
+com.netease.cfxf
+com.netease.ywzh
+com.pauloondra.zerostressking
+com.rawfury.kingdom2crowns
+com.riichicity.happywoods
+com.tencent.rmcn
+jp.co.cygames.ShadowverseWorldsBeyond

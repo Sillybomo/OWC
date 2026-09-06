@@ -1,0 +1,6 @@
+id=OWC
+name=OWC亮屏快充
+version=v1.3.0
+versionCode=5
+author=bomo
+description=⚡OWC 亮屏快充（自 OPP battery_spoof 分离）⚡ 充电时停 ORMS + horae testmode + 壳温伪装34°C → 亮屏满功率快充；游戏/电池≥46°C/CPU≥85°C 自动暂停；可与其他模块独立启停，用于对照测试续航

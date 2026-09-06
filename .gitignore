@@ -1,0 +1,5 @@
+*.zip
+*.apk
+*.keystore
+tmp/
+*.log
