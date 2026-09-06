@@ -18,7 +18,7 @@
 
 ## 这是什么
 
-一加 / OPPO / realme（ColorOS / OxygenOS）的"亮屏降速充电"是系统的**有意行为**：亮屏时充电内核写入降流档，功率直接砍半以上（实测一加 15T：熄屏 78W → 亮屏 22W）。
+一加 / OPPO / realme（ColorOS / OxygenOS）的"亮屏降速充电"是系统的**有意行为**：亮屏时充电内核写入降流档，功率直接砍半以上（实测一加 15T：亮屏 ~22W → 解锁后 ~45W，以充电头显示为准）。
 
 OWC（OP WarpCharge）按通用模块设计，把这套限流完整解开，并提供**控制中心磁贴**随时热切换：
 
@@ -113,7 +113,7 @@ adb install owc-app-debug.apk
 
 | 项目 | 状态 | 说明 |
 | --- | --- | --- |
-| 一加 15T · ColorOS 16 · Android 16 | ✅ **唯一实测** | 双电芯 SuperVOOC，亮屏 22W → 78W |
+| 一加 15T · ColorOS 16 · Android 16 | ✅ **唯一实测** | 双电芯 100W，亮屏 ~22W → ~45W（充电头读数） |
 | 其他一加 / OPPO / realme（ColorOS 系） | ⚠️ 自测 | 理论兼容，随缘适配 |
 | 非 OPlus 系统 | ❌ | 依赖 oplus_chg / horae 私有节点，无法使用 |
 
