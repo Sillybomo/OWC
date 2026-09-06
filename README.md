@@ -4,6 +4,12 @@
 >
 > @author bomo · Inspired by AaTempSpoof & OPP 官方全局扩展
 
+> [!IMPORTANT]
+> **目前仅在一加 15T（PLZ110 · ColorOS 16 · Android 16）上完整实测可用。**
+> 其他机型理论上原理相通，但节点路径/服务名因机型与系统版本可能不同，
+> **需要自行测试**。本项目为个人自用工具开源，**随缘更新**，不承诺适配。
+> 适配反馈请附 `tmp/warp_charge.log` 与机型信息。
+
 [![Version](https://img.shields.io/badge/version-v1.3.0-blue)]()
 [![Platform](https://img.shields.io/badge/platform-ColorOS%2016%20%2F%20Android%2016-green)]()
 [![Root](https://img.shields.io/badge/root-Magisk%20%7C%20KernelSU-orange)]()
