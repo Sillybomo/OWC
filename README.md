@@ -10,7 +10,7 @@
 > **需要自行测试**。本项目为个人自用工具开源，**随缘更新**，不承诺适配。
 > 适配反馈请附 `tmp/warp_charge.log` 与机型信息。
 
-[![Version](https://img.shields.io/badge/version-v1.3.1-blue)]()
+[![Version](https://img.shields.io/badge/version-v1.4.0-blue)]()
 [![Platform](https://img.shields.io/badge/platform-ColorOS%2016%20%2F%20Android%2016-green)]()
 [![Root](https://img.shields.io/badge/root-Magisk%20%7C%20KernelSU-orange)]()
 
@@ -82,8 +82,10 @@ App 只是遥控器，全部业务逻辑在 shell 守护中（单一实现，防
   `cool_down` / `oplus_chg` 温度 / `shell-temp` / horae 的模块）——OWC 直接写
   充电内核节点，共存会互相覆盖，充电行为不可预期。安装脚本会自动检测并
   **拒绝安装**。
-- **机型提示**：仅一加 15T（PLZ110）经过验证，其他机型安装时会提示未验证
-  （不拦截）。无效请到项目帖/issue 留言，作者随缘更新。
+- **机型确认**：仅一加 15T（PLZ110）经过验证。其他机型安装时安装器会提示
+  未验证，并要求**按音量键显式确认**：`音量上 = 继续安装`、
+  `音量下 = 取消`、**10 秒无操作自动取消**（安全默认）。无效请到项目帖/issue
+  留言，作者随缘更新。
 
 ## 安装
 
@@ -91,6 +93,8 @@ App 只是遥控器，全部业务逻辑在 shell 守护中（单一实现，防
 
 1. 下载 [Releases](../../releases) 中的模块 zip（或自行打包本仓库根目录）
 2. Magisk / KernelSU 管理器刷入，重启
+   - 非 PLZ110 设备会提示未验证机型，按 **音量上** 确认继续（音量下或
+     10 秒无操作则取消安装）
 
 ### App（可选，用于控制中心磁贴）
 
