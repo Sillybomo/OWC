@@ -61,13 +61,21 @@ TEMP_RESUME_BATT=420            # 电池恢复线（0.1°C）——暂停后须�
 # @author bomo v1.4.4（2026-09-15 23:19 游戏态实测修正）：85 档恢复线 78°C 定错了，
 #   实测（异环 + 充电，23:13~23:17）CPU 在游戏中常态就在 70~82°C 抖动，78°C 正好压在
 #   波动带中央 → 每次穿越都把恢复确认计数清零（日志可见 1/3→2/3→清零→1/3→2/3，
-#   23:16:09~23:16:28 卡在暂停态近 80s 未能恢复）。降到 72°C：跳出波动带下沿，
-#   恢复判定不再被瞬时尖峰反复打断。暂停线 85°C 不动（PMIC 95°C 硬复位余量，实测
-#   游戏态真摸到 85.7°C，这条线是唯一在踩刹车的东西，不让步）。
-TEMP_RESUME_CPU=72000           # CPU 恢复线（m°C）——≤72°C 才恢复（85/72 滞回死区）
+#   23:16:09~23:16:28 卡在暂停态近 80s 未能恢复）。
+#
+# @author bomo v1.4.5（2026-09-15 23:28 二次实测修正）：v1.4.4 的 72°C 更错——**结构不可达**。
+#   关键发现：get_cpu_temp() 取的是**全 SoC 所有 cpu 核心的最高温**（遍历 thermal_zone，
+#   取 max），而非单个代表核心。实测游戏态各核分布 zone0/1=72~76°C、zone10=81.8°C、
+#   zone14=**83.0°C** ⇒ 恢复线 72°C 永远够不到 → 23:20:41 暂停后**连续 3 分 7 秒无法
+#   恢复**，日志零状态行（因 TEMP_CONFIRM 恒 0，_log_status 状态串不变而不打印）。
+#   教训：**恢复线必须与暂停线同口径 + 留够死区**。暂停看"最热核"(85°C)，
+#   恢复也看"最热核"，死区 5°C → 恢复线 80°C。游戏常态最热核 79~83°C，80 可穿越。
+#   暂停线 85°C 不动（PMIC 95°C 硬复位余量，实测游戏态真摸到 86.1°C）。
+TEMP_RESUME_CPU=80000           # CPU 恢复线（m°C，同 get_cpu_temp 的"最热核"口径）
+                                # ≤80°C 才恢复（85/80 滞回死区 5°C）
 RESUME_CONFIRM=3                # 恢复前连续达标采样次数（3×4s≈12s，防单次尖刺）
 GAME_TEMP_CEILING=480           # 游戏中电池暂停线放宽到 48°C；CPU 线不动（PMIC 安全余量不让步）
-                                # 实测备注（2026-09-15 游戏态）：电池全程 38.6~39.0°C，
+                                # 实测备注（2026-09-15 游戏态）：电池全程 37.7~39.4°C，
                                 # 离 48°C 差 9°C 从未触发——保留给"边充边玩长局"场景，非空转错误。
 # ====================================================
 
@@ -206,6 +214,15 @@ apply_warp_charge() {
 }
 
 # 恢复亮屏快充（恢复ORMS + horae正常模式）
+# @author bomo v1.4.5: 新增 $1 控制「是否交还亮屏降流控制权(cool_down)」。
+#   背景（2026-09-15 23:28 实测）：原实现无条件 restore_cool_down（写 5），导致
+#   **CPU 过热暂停时也把 cool_down 交还系统** → 用户实测充电头只剩 **15W**（系统
+#   亮屏降流档），而当时电池才 37.7°C，根本没到该降功率的程度。
+#   分级语义（默认交还，仅 CPU 过热显式保持）：
+#     参数 = "cpu_hot"  → **仅 CPU 过热**：保持 cool_down=0 满功率通路，只撤温控伪装
+#     参数缺失/其他     → 电池过热、充电断开、用户关闭、守护退出：交还 cool_down
+#   理由：CPU/SoC 过热该降温控伪装与 ORMS 调度，不该连充电功率一起打掉；
+#         电池过热 / 不再需要伪装时，理应把降流控制权交还系统。
 restore_warp_charge() {
     # 恢复horae温控HAL（退出测试模式）
     dumpsys horae testmode false 2>/dev/null
@@ -218,8 +235,16 @@ restore_warp_charge() {
         setprop persist.sys.orms.name "$ORMS_NAME"
     fi
 
-    # 交还亮屏降流控制权（恢复系统默认策略，让真实温度重新生效）
-    restore_cool_down
+    # 亮屏降流控制权：默认交还系统；仅 CPU 过热场景保持满功率通路
+    # @author bomo v1.4.5: 原来是一律交还，现按暂停原因分级（见函数头注释）
+    if [ "$1" = "cpu_hot" ]; then
+        # CPU 过热：撤下温控伪装降温控策略，但**保留 cool_down=0 不牺牲充电功率**
+        apply_cool_down_override
+        _log "[亮屏快充] CPU 过热暂停：保持 cool_down=0（不牺牲充电功率）"
+    else
+        restore_cool_down
+        _log "[亮屏快充] 已交还 cool_down 降流控制权"
+    fi
 
     WARP_ACTIVE=0
     _log "[亮屏快充] 已恢复 ORMS + horae"
@@ -266,12 +291,16 @@ warp_temp_hot() {
     [ "$GAME_ACTIVE" = "1" ] && batt_pause="$GAME_TEMP_CEILING"
     if [ "$rt" -ge "$batt_pause" ] 2>/dev/null; then
         WARP_GUARD_REASON="电池温度 ${rt} >= ${batt_pause}"
+        # @author bomo v1.4.5: 标记过热来源，供调用方决定是否交还 cool_down
+        WARP_GUARD_SRC="battery"
         OVERHEAT=1
         TEMP_CONFIRM=0
         return 0
     fi
     if [ "$ct" -ge "$CPU_TEMP_CEILING" ] 2>/dev/null; then
         WARP_GUARD_REASON="CPU/SoC温度 ${ct} >= ${CPU_TEMP_CEILING}"
+        # @author bomo v1.4.5: CPU 过热 —— 保持 cool_down=0，不牺牲充电功率
+        WARP_GUARD_SRC="cpu"
         OVERHEAT=1
         TEMP_CONFIRM=0
         return 0
@@ -376,6 +405,7 @@ WARP_ACTIVE=0
 # @author bomo v1.4.3: 滞回状态机与日志计数初始化
 OVERHEAT=0            # 1 = 处于过热暂停（滞回死区内不恢复）
 TEMP_CONFIRM=0        # 恢复线以下连续采样计数
+WARP_GUARD_SRC=""     # @author bomo v1.4.5: 过热来源（cpu / battery），决定是否交还 cool_down
 PAUSE_SINCE=0         # 本次过热暂停起始时间戳（秒），0=未暂停
 TOGGLE_HOUR=""        # 切换计数所在小时
 TOGGLE_COUNT=0        # 该小时内 暂停/恢复 切换次数
@@ -428,14 +458,22 @@ while true; do
         if warp_temp_hot; then
             # 温度超限保护（电池 / CPU-SoC）
             if [ "$WARP_ACTIVE" = "1" ]; then
-                restore_warp_charge
+                # @author bomo v1.4.5: 按过热来源分级恢复——
+                #   CPU 过热 → 传 cpu_hot：保持 cool_down=0，不牺牲充电功率（实测 15W 事故的修复）
+                #   电池过热 → 默认：交还 cool_down，让系统按真实壳温降功率
+                if [ "$WARP_GUARD_SRC" = "cpu" ]; then
+                    restore_warp_charge cpu_hot
+                else
+                    restore_warp_charge
+                fi
                 PAUSE_SINCE=$(date +%s)
                 count_toggle
-                _log "⚠ 安全保护：${WARP_GUARD_REASON}，亮屏快充已暂停（本小时第 ${TOGGLE_COUNT} 次切换｜游戏=${GAME_ACTIVE}）"
+                _log "⚠ 安全保护：${WARP_GUARD_REASON}，亮屏快充已暂停（来源=${WARP_GUARD_SRC}｜本小时第 ${TOGGLE_COUNT} 次切换｜游戏=${GAME_ACTIVE}）"
             fi
             # @author bomo v1.4.3: 状态串带确认计数——恢复确认每次递增都会落一条日志，
             # 便于观察滞回防抖是否生效（v1.4.2 的 _log_status 只在状态翻转时记）。
-            _log_status "safe_stop_c${TEMP_CONFIRM}" "亮屏快充已暂停（${WARP_GUARD_REASON}｜游戏=${GAME_ACTIVE}）"
+            # @author bomo v1.4.5: 追加过热来源，避免 CPU/电池两种暂停共用同一状态串而漏记。
+            _log_status "safe_stop_${WARP_GUARD_SRC}_c${TEMP_CONFIRM}" "亮屏快充已暂停（${WARP_GUARD_REASON}｜游戏=${GAME_ACTIVE}）"
         else
             # @author bomo v1.4.3: 过热暂停后的恢复——滞回确认通过即立即恢复并记录
             # 暂停时长（原逻辑要等 WARP_REAPPLY_CYCLE 周期重应用，最长 64s）。
@@ -447,6 +485,7 @@ while true; do
                 count_toggle
                 _log "✔ 温度已回落（电池=${real_temp}｜CPU=${cpu_temp}｜暂停持续 ${pause_dur}s），亮屏快充已恢复（本小时第 ${TOGGLE_COUNT} 次切换）"
                 PAUSE_SINCE=0
+                WARP_GUARD_SRC=""
             fi
             # 正常：游戏中也保持亮屏快充（温度未到即不限）
             _log_status "warp_on" "亮屏快充运行中（游戏=${GAME_ACTIVE}｜电池=${real_temp}｜CPU=${cpu_temp}）"
