@@ -18,9 +18,20 @@
 #   继续快充 = SoC 持续升温而系统不知情；现在改由上面两条温度线把关（守护每 4s
 #   轮询真实温度，超限即停），游戏信息仍进日志便于回溯。
 #   若日后觉得游戏场景需要更严余量，可另加游戏专属门槛（如电池 42°C / CPU 78°C）
-#   并在 warp_temp_hot 内按 GAME_ACTIVE 切换——**当前未启用，与非游戏共用同一组阈值**。
+#   并在 warp_temp_hot 内按 GAME_ACTIVE 切换。
 #   4. 充电断开 / 进程退出 → 恢复 ORMS + horae（还原系统状态）
 #      ↑ 条目编号沿用原文档（原第 1 条撤除后不再重排），便于与历史记录对照。
+#
+# @author bomo v1.4.3（2026-09-15）：温度滞回防抖 + 恢复确认 + 游戏独立阈值。
+#   背景：v1.4.2 单阈值无状态——温度在 85°C 线上每跳一次就 restore/apply 一次，
+#   实测 22:36~22:40 开机+充电场景 4 分钟内暂停/恢复抖动 3 次。
+#   ① 滞回：暂停线不变（电池 46°C / CPU 85°C），恢复线独立（电池 ≤42°C /
+#      CPU ≤78°C），死区内保持原状态不翻转。
+#   ② 恢复确认：回落恢复线以下后须连续 RESUME_CONFIRM 次采样达标才恢复，
+#      防单次尖刺。
+#   ③ 日志：暂停/恢复记录温度、暂停持续时长、本小时切换次数。
+#   ④ 游戏态电池暂停线放宽到 48°C（游戏本身发热大，避免正常游戏温度误伤
+#      快充体验）；CPU 线不动——那是防 PMIC 95°C 硬复位的安全余量，不让步。
 #
 # 不包含：电池温度伪装(emul_temp/oplus_chg)、循环次数伪装。
 #
@@ -44,6 +55,12 @@ WARP_REAPPLY_CYCLE=8            # 每 N 轮重新应用一次 horae testmode（�
 # @author bomo: 阈值语义在拆分时原样继承，保持不变
 SAFE_TEMP_CEILING=460           # 电池真实温度上限（0.1°C，460=46°C）
 CPU_TEMP_CEILING=85000          # CPU/SoC 温度上限（m°C，85000=85°C，防 95°C 硬复位）
+# @author bomo v1.4.3: 滞回恢复线与恢复确认（暂停线沿用上面两条，不变）。
+# 实测 v1.4.2 在 85°C 线上 4 分钟抖 3 次（22:36~22:40 日志），死区+连续确认治抖。
+TEMP_RESUME_BATT=420            # 电池恢复线（0.1°C）——暂停后须降到 ≤42°C 才恢复
+TEMP_RESUME_CPU=78000           # CPU 恢复线（m°C）——≤78°C 才恢复（85/78 滞回死区）
+RESUME_CONFIRM=3                # 恢复前连续达标采样次数（3×4s≈12s，防单次尖刺）
+GAME_TEMP_CEILING=480           # 游戏中电池暂停线放宽到 48°C；CPU 线不动（PMIC 安全余量不让步）
 # ====================================================
 
 # ==================== ORMS 全局变量（一次性检测） ====================
@@ -203,22 +220,67 @@ restore_warp_charge() {
 # @author bomo v1.4.2: 温度安全栏——**唯一的暂停依据**。
 # 返回 0 = 已过热（必须停 WARP）；返回 1 = 正常（可继续亮屏快充）。
 # 超限原因写入全局 WARP_GUARD_REASON 供日志使用（避免各处重复取温度）。
-# 游戏运行状态不参与本判定（用户要求：游戏与温度须同时满足才限制，
+# 游戏运行状态不参与暂停触发（用户要求：游戏与温度须同时满足才限制，
 # 而温度未到时游戏不应单独触发暂停）。
+#
+# @author bomo v1.4.3: 改为带滞回的状态机（治 85°C 线上 4 分钟抖 3 次的实测问题）。
+#   未暂停(OVERHEAT=0)：触及暂停线才停（游戏态电池线放宽到 GAME_TEMP_CEILING）。
+#   已暂停(OVERHEAT=1)：两条温度线都回到恢复线以下、且连续 RESUME_CONFIRM 次
+#   达标，才真正放行；中间死区（42~46°C / 78~85°C）保持暂停不翻转。
+#   CLI apply 单次调用时 OVERHEAT 初值 0，行为退化为 v1.4.2 的单次暂停线检查，
+#   语义兼容。游戏态切换只影响"暂停触发线"，不影响恢复线（恢复线更严，统一）。
 warp_temp_hot() {
     WARP_GUARD_REASON=""
-    local rt ct
+    local rt ct batt_pause
     rt=$(get_real_temp)
     ct=$(get_cpu_temp)
-    if [ "$rt" -gt 0 ] && [ "$rt" -ge "$SAFE_TEMP_CEILING" ] 2>/dev/null; then
-        WARP_GUARD_REASON="电池温度 ${rt} >= ${SAFE_TEMP_CEILING}"
+    # 传感器读数异常时按"未回恢复线"处理（保守，不误恢复）
+    [ "$rt" -gt 0 ] 2>/dev/null || rt=9999
+    [ "$ct" -gt 0 ] 2>/dev/null || ct=9999999
+
+    if [ "$OVERHEAT" = "1" ]; then
+        if [ "$rt" -le "$TEMP_RESUME_BATT" ] && [ "$ct" -le "$TEMP_RESUME_CPU" ]; then
+            TEMP_CONFIRM=$(( TEMP_CONFIRM + 1 ))
+            if [ "$TEMP_CONFIRM" -ge "$RESUME_CONFIRM" ]; then
+                OVERHEAT=0
+                TEMP_CONFIRM=0
+                return 1
+            fi
+            WARP_GUARD_REASON="恢复确认中 ${TEMP_CONFIRM}/${RESUME_CONFIRM}（电池=${rt}｜CPU=${ct}）"
+        else
+            TEMP_CONFIRM=0
+            WARP_GUARD_REASON="未回恢复线（电池=${rt}/${TEMP_RESUME_BATT}｜CPU=${ct}/${TEMP_RESUME_CPU}）"
+        fi
         return 0
     fi
-    if [ "$ct" -gt 0 ] && [ "$ct" -ge "$CPU_TEMP_CEILING" ] 2>/dev/null; then
+
+    batt_pause="$SAFE_TEMP_CEILING"
+    [ "$GAME_ACTIVE" = "1" ] && batt_pause="$GAME_TEMP_CEILING"
+    if [ "$rt" -ge "$batt_pause" ] 2>/dev/null; then
+        WARP_GUARD_REASON="电池温度 ${rt} >= ${batt_pause}"
+        OVERHEAT=1
+        TEMP_CONFIRM=0
+        return 0
+    fi
+    if [ "$ct" -ge "$CPU_TEMP_CEILING" ] 2>/dev/null; then
         WARP_GUARD_REASON="CPU/SoC温度 ${ct} >= ${CPU_TEMP_CEILING}"
+        OVERHEAT=1
+        TEMP_CONFIRM=0
         return 0
     fi
     return 1
+}
+
+# @author bomo v1.4.3: 本小时状态切换计数（暂停/恢复各记一次，供日志观察防抖效果）。
+# 跨小时自动归零；小时串作为状态存 TOGGLE_HOUR，无需落盘。
+count_toggle() {
+    local h
+    h=$(date '+%Y-%m-%d %H')
+    if [ "$h" != "$TOGGLE_HOUR" ]; then
+        TOGGLE_HOUR="$h"
+        TOGGLE_COUNT=0
+    fi
+    TOGGLE_COUNT=$(( TOGGLE_COUNT + 1 ))
 }
 
 # ==================== CLI 单次动作模式 ====================
@@ -303,6 +365,12 @@ PREV_CHARGING=0
 # @author bomo v1.4.2: 补初始化——此前 WARP_ACTIVE 未赋值，导致心跳里
 # "亮屏快充=" 打印为空，且「游戏退出后立即恢复」因条件 `= "0"` 不成立被静默跳过。
 WARP_ACTIVE=0
+# @author bomo v1.4.3: 滞回状态机与日志计数初始化
+OVERHEAT=0            # 1 = 处于过热暂停（滞回死区内不恢复）
+TEMP_CONFIRM=0        # 恢复线以下连续采样计数
+PAUSE_SINCE=0         # 本次过热暂停起始时间戳（秒），0=未暂停
+TOGGLE_HOUR=""        # 切换计数所在小时
+TOGGLE_COUNT=0        # 该小时内 暂停/恢复 切换次数
 loop_count=0
 
 # ==================== 守护循环 ====================
@@ -353,10 +421,25 @@ while true; do
             # 温度超限保护（电池 / CPU-SoC）
             if [ "$WARP_ACTIVE" = "1" ]; then
                 restore_warp_charge
-                _log "⚠ 安全保护：${WARP_GUARD_REASON}，亮屏快充已暂停"
+                PAUSE_SINCE=$(date +%s)
+                count_toggle
+                _log "⚠ 安全保护：${WARP_GUARD_REASON}，亮屏快充已暂停（本小时第 ${TOGGLE_COUNT} 次切换｜游戏=${GAME_ACTIVE}）"
             fi
-            _log_status "safe_stop" "亮屏快充已暂停（${WARP_GUARD_REASON}｜游戏=${GAME_ACTIVE}）"
+            # @author bomo v1.4.3: 状态串带确认计数——恢复确认每次递增都会落一条日志，
+            # 便于观察滞回防抖是否生效（v1.4.2 的 _log_status 只在状态翻转时记）。
+            _log_status "safe_stop_c${TEMP_CONFIRM}" "亮屏快充已暂停（${WARP_GUARD_REASON}｜游戏=${GAME_ACTIVE}）"
         else
+            # @author bomo v1.4.3: 过热暂停后的恢复——滞回确认通过即立即恢复并记录
+            # 暂停时长（原逻辑要等 WARP_REAPPLY_CYCLE 周期重应用，最长 64s）。
+            if [ "$WARP_ACTIVE" = "0" ] && [ "$PREV_CHARGING" = "1" ]; then
+                now=$(date +%s)
+                pause_dur=0
+                [ "$PAUSE_SINCE" -gt 0 ] 2>/dev/null && pause_dur=$(( now - PAUSE_SINCE ))
+                apply_warp_charge
+                count_toggle
+                _log "✔ 温度已回落（电池=${real_temp}｜CPU=${cpu_temp}｜暂停持续 ${pause_dur}s），亮屏快充已恢复（本小时第 ${TOGGLE_COUNT} 次切换）"
+                PAUSE_SINCE=0
+            fi
             # 正常：游戏中也保持亮屏快充（温度未到即不限）
             _log_status "warp_on" "亮屏快充运行中（游戏=${GAME_ACTIVE}｜电池=${real_temp}｜CPU=${cpu_temp}）"
             # 周期性重应用（防 horae testmode 被系统重置）
