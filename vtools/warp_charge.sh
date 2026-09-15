@@ -109,7 +109,23 @@ TRIP_SHELL=48000                # 壳温熔断线（m°C，48000=48°C）—— 
 # 兼容别名：主循环与 restore 分级仍按旧名引用，保持最小侵入（语义 = 对应熔断线）
 SAFE_TEMP_CEILING="$TRIP_BATT"
 CPU_TEMP_CEILING="$TRIP_CPU"
-RESUME_CONFIRM=3                # 复归确认：连续 3 次（≈12s）全部低于熔断线才复归，防抖
+# @author bomo v1.4.8（2026-09-16 游戏态实测后的修正）：**复归死区**（hysteresis）。
+#   实测证据（异环 + 亮屏快充，00:18~00:21）：CPU 在 **90.7~94.2°C** 之间每 6 秒振荡，
+#   熔断线 92°C 正压在这段振荡带的**中心**。于是状态机反复走
+#     「复归确认中 1/3（CPU=91.5）→ 熔断持续（CPU=93.8）→ 复归确认中 1/3…」
+#   —— 5 次「1/3」、**0 次攒满 3/3**，RESUME_CONFIRM 被完全穿透，状态机空转、日志刷屏。
+#   ★ 修法：复归线不再等于熔断线，而是**熔断线下方留出死区**（本轮前它俩是同一个数，
+#     所以"连续采样确认"对振荡带毫无防御力——采样永远等不到 3 连达标的窗口）。
+#   死区取 3°C：实测振荡带宽度约 3.5°C，死区 ≥ 振荡带宽才能在带内稳定不翻转；
+#   同时 3°C 足够小，真冷却（退游戏 / 上散热器）时能快速复归，不会拖成"熔断后不恢复"。
+#   （v1.4.4→v1.4.6 三次"调恢复线"失败，是因当时把恢复线当"调速"去追温度；
+#     现在恢复线只是**状态机的复归闸门**，不承担任何"争取快充"的语义。）
+TRIP_RESUME_GAP=3000            # 复归死区（m°C）= 3°C（电池侧按 0.1°C 单位单列，见下）
+TRIP_RESUME_CPU=$(( TRIP_CPU - TRIP_RESUME_GAP ))     # 89000
+TRIP_RESUME_GPU=$(( TRIP_GPU - TRIP_RESUME_GAP ))     # 89000
+TRIP_RESUME_BATT=$(( TRIP_BATT - 30 ))                # 420（0.1°C 单位，=42°C，同样 3°C 死区）
+TRIP_RESUME_SHELL=$(( TRIP_SHELL - TRIP_RESUME_GAP )) # 45000
+RESUME_CONFIRM=3                # 复归确认：连续 3 次（≈12s）全部低于**复归线**才复归，防抖
 # ====================================================
 
 # ==================== ORMS 全局变量（一次性检测） ====================
@@ -290,9 +306,19 @@ restore_warp_charge() {
 #     - BATT TRIP_BATT=450    电池真实温度（0.1°C 单位）
 #     - SHELL TRIP_SHELL=48000 shell_front/frame/back 最热面
 #   熔断来源写入 WARP_GUARD_SRC（cpu/gpu/batt/shell），供调用方分级处理。
-#   复归：四路**全部**回落到各自熔断线以下，连续 RESUME_CONFIRM 次才复归（防抖）。
+#   复归：四路**全部**回落到各自**复归线**（熔断线 − TRIP_RESUME_GAP）以下，
+#         连续 RESUME_CONFIRM 次才复归（防抖）。
 #   未熔断(OVERHEAT=0)：任一撞线即熔断。**不再区分游戏/非游戏**（用户要求全局统一）。
 #   CLI apply 单次调用时 OVERHEAT 初值 0，行为退化为单次熔断线检查，语义兼容。
+#
+# @author bomo v1.4.8（2026-09-16 游戏态实测后的修正）：**熔断/复归分线**（死区）。
+#   实测（异环，00:18~00:21）CPU 在 90.7~94.2°C 每 6s 振荡，熔断线 92 正压带中心 →
+#   v1.4.7 的"回落到熔断线以下算达标"每次都只攒到 1/3 就被打回，**0 次攒满**，
+#   状态机空转刷日志。现在：
+#     熔断判定用 TRIP_*（原值不变，92/92/450/48000）—— 保险丝行为零变化；
+#     复归判定用 TRIP_RESUME_*（89/89/420/45000）—— 振荡带整个落在死区内，
+#       任一采样都到不了 89 ⇒ 稳定保持熔断，不再空转；
+#       真冷却（退游戏/上散热器）时才可能连攒 3 次，干净复归。
 warp_temp_hot() {
     WARP_GUARD_REASON=""
     local rt ct gt st
@@ -300,13 +326,13 @@ warp_temp_hot() {
     ct=$(get_cpu_temp)
     gt=$(get_gpu_temp)
     st=$(get_shell_temp)
-    # 传感器读数异常时按"未回熔断线"处理（保守，不误恢复）
+    # 传感器读数异常时按"未回复归线"处理（保守，不误恢复）
     [ "$rt" -gt 0 ] 2>/dev/null || rt=9999
     [ "$ct" -gt 0 ] 2>/dev/null || ct=9999999
     [ "$gt" -gt 0 ] 2>/dev/null || gt=9999999
     [ "$st" -gt 0 ] 2>/dev/null || st=9999999
 
-    # 四路独立越线判定（1 = 已越线）
+    # 熔断判定：四路独立越线（>= 熔断线，1 = 已越线）
     local batt_hot=0 cpu_hot=0 gpu_hot=0 shell_hot=0
     [ "$rt" -ge "$TRIP_BATT" ] 2>/dev/null && batt_hot=1
     [ "$ct" -ge "$TRIP_CPU" ] 2>/dev/null && cpu_hot=1
@@ -317,12 +343,19 @@ warp_temp_hot() {
         any_hot=1
     fi
 
+    # 复归判定：四路是否**全部**降到复归线以下（v1.4.8 死区，与熔断判定分开）
+    local any_above_resume=0
+    [ "$rt" -gt "$TRIP_RESUME_BATT" ] 2>/dev/null && any_above_resume=1
+    [ "$ct" -gt "$TRIP_RESUME_CPU" ] 2>/dev/null && any_above_resume=1
+    [ "$gt" -gt "$TRIP_RESUME_GPU" ] 2>/dev/null && any_above_resume=1
+    [ "$st" -gt "$TRIP_RESUME_SHELL" ] 2>/dev/null && any_above_resume=1
+
     # 统一温度快照串，供日志/原因复用（避免各处重复拼装）
     local snap="电池=${rt}｜CPU=${ct}｜GPU=${gt}｜壳温=${st}"
 
-    # ---- 已熔断：四路全部回落 + 连续确认才复归 ----
+    # ---- 已熔断：四路全部落回复归线以下 + 连续确认才复归 ----
     if [ "$OVERHEAT" = "1" ]; then
-        if [ "$any_hot" = "0" ]; then
+        if [ "$any_hot" = "0" ] && [ "$any_above_resume" = "0" ]; then
             TEMP_CONFIRM=$(( TEMP_CONFIRM + 1 ))
             if [ "$TEMP_CONFIRM" -ge "$RESUME_CONFIRM" ]; then
                 OVERHEAT=0
@@ -332,7 +365,12 @@ warp_temp_hot() {
             WARP_GUARD_REASON="复归确认中 ${TEMP_CONFIRM}/${RESUME_CONFIRM}（${snap}）"
         else
             TEMP_CONFIRM=0
-            WARP_GUARD_REASON="熔断持续（${snap}）"
+            if [ "$any_hot" = "1" ]; then
+                WARP_GUARD_REASON="熔断持续（${snap}）"
+            else
+                # 未越熔断线但仍在死区内（熔断线 > 温度 > 复归线）——状态保持熔断，不计数
+                WARP_GUARD_REASON="死区内待冷却（需 ≤${TRIP_RESUME_CPU}｜${snap}）"
+            fi
         fi
         return 0
     fi
@@ -531,7 +569,7 @@ while true; do
                 [ "$PAUSE_SINCE" -gt 0 ] 2>/dev/null && pause_dur=$(( now - PAUSE_SINCE ))
                 apply_warp_charge
                 count_toggle
-                _log "✔ 温度已回落（电池=${real_temp}｜CPU=${cpu_temp}｜熔断持续 ${pause_dur}s），亮屏快充已恢复（本小时第 ${TOGGLE_COUNT} 次切换）"
+                _log "✔ 温度已回落至复归线以下（电池=${real_temp}｜CPU=${cpu_temp}｜熔断持续 ${pause_dur}s｜复归线 CPU≤${TRIP_RESUME_CPU}），亮屏快充已恢复（本小时第 ${TOGGLE_COUNT} 次切换）"
                 PAUSE_SINCE=0
                 WARP_GUARD_SRC=""
             fi
