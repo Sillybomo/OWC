@@ -8,11 +8,19 @@
 #       即绕过限功率策略；ORMS 是充电调度服务，停止后不做保守限速。
 #
 # 安全栏（源自 8-13/8-15/8-19 热失控教训，不可删）：
-#   1. 游戏运行中暂停 —— shell-temp 伪装也是骗温控，游戏中继续 = SoC 持续
-#      升温而系统不知情（游戏时继续亮屏快充 = 换条路继续骗温控）
-#   2. 电池真实温度 >= SAFE_TEMP_CEILING(46°C) 暂停
-#   3. CPU/SoC >= CPU_TEMP_CEILING(85°C) 暂停（防 PMIC 硬复位 95°C，留 10°C 余量）
+#   1. 电池真实温度 >= SAFE_TEMP_CEILING(46°C) 暂停
+#   2. CPU/SoC >= CPU_TEMP_CEILING(85°C) 暂停（防 PMIC 硬复位 95°C，留 10°C 余量）
+#
+# @author bomo v1.4.2（2026-09-15 用户要求）：安全栏由「场景驱动」改成「温度驱动」。
+#   原第 1 条「游戏运行中暂停」已撤除——它会在温度完全正常时（实测 38.3°C 电池 /
+#   73.3°C CPU）仅因检测到游戏就停掉亮屏快充，与"游戏与温度须同时满足才限制"的
+#   预期不符。原设计意图保留在此作历史依据：shell-temp 伪装本身就是骗温控，游戏中
+#   继续快充 = SoC 持续升温而系统不知情；现在改由上面两条温度线把关（守护每 4s
+#   轮询真实温度，超限即停），游戏信息仍进日志便于回溯。
+#   若日后觉得游戏场景需要更严余量，可另加游戏专属门槛（如电池 42°C / CPU 78°C）
+#   并在 warp_temp_hot 内按 GAME_ACTIVE 切换——**当前未启用，与非游戏共用同一组阈值**。
 #   4. 充电断开 / 进程退出 → 恢复 ORMS + horae（还原系统状态）
+#      ↑ 条目编号沿用原文档（原第 1 条撤除后不再重排），便于与历史记录对照。
 #
 # 不包含：电池温度伪装(emul_temp/oplus_chg)、循环次数伪装。
 #
@@ -71,15 +79,22 @@ safe_dumpsys() {
 }
 
 # Android 16 兼容的前台游戏检测
+# @author bomo v1.4.2: 两处健壮性修复（与 ohzd 同日的同类坑）
+#   ① 方案 A 补 `ResumedActivity` 标记——ColorOS 16 / PLZ110 实测 `dumpsys activity
+#      activities` 里既没有 `topResumedActivity=` 也没有 `mResumedActivity:`，
+#      只有 `ResumedActivity:`，沿用旧标记会恒取不到包名。
+#   ② 方案 B 把 `head -1` 移到 grep -oE 之后——原写法只看第一条匹配行，而通知栏
+#      / 输入法这类窗口的 mCurrentFocus 不带"包名/Activity"，会直接把整条链掐断，
+#      即使下一行 mFocusedApp 里有包名也读不到。改为取第一条**含包名**的焦点行。
 is_game_running() {
     [ ! -f "$FILTERED_LIST" ] && return 1
 
     local pkg=""
     # 方案 A：使用 dumpsys activity
-    pkg=$(safe_dumpsys activity activities | grep -E 'mResumedActivity|topResumedActivity' | head -1 | grep -oE '[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+' | head -1 | cut -d'/' -f1)
+    pkg=$(safe_dumpsys activity activities | grep -E 'mResumedActivity|topResumedActivity|ResumedActivity' | head -1 | grep -oE '[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+' | head -1 | cut -d'/' -f1)
     # 方案 B：Fallback 到 dumpsys window
     if [ -z "$pkg" ]; then
-        pkg=$(safe_dumpsys window | grep -E 'mCurrentFocus|mFocusedApp' | head -1 | grep -oE '[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+' | head -1 | cut -d'/' -f1)
+        pkg=$(safe_dumpsys window | grep -E 'mCurrentFocus|mFocusedApp' | grep -oE '[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+' | head -1 | cut -d'/' -f1)
     fi
     [ -z "$pkg" ] && return 1
     # 匹配黑名单
@@ -96,7 +111,8 @@ update_game_active() {
             _log "游戏已退出"
             # 游戏退出后立即恢复亮屏快充(不等周期)。仅在充电状态下恢复,
             # 避免放电状态下误停 ORMS/写 shell-temp 伪装。
-            if [ "$current_charging" = "1" ] && [ "$WARP_ACTIVE" = "0" ]; then
+            # @author bomo v1.4.2: 补温度守卫——过热暂停期间不得被本路径绕过。
+            if [ "$current_charging" = "1" ] && [ "$WARP_ACTIVE" = "0" ] && ! warp_temp_hot; then
                 apply_warp_charge
                 _log "[亮屏快充] 游戏退出后已恢复"
             fi
@@ -184,6 +200,27 @@ restore_warp_charge() {
     _log "[亮屏快充] 已恢复 ORMS + horae"
 }
 
+# @author bomo v1.4.2: 温度安全栏——**唯一的暂停依据**。
+# 返回 0 = 已过热（必须停 WARP）；返回 1 = 正常（可继续亮屏快充）。
+# 超限原因写入全局 WARP_GUARD_REASON 供日志使用（避免各处重复取温度）。
+# 游戏运行状态不参与本判定（用户要求：游戏与温度须同时满足才限制，
+# 而温度未到时游戏不应单独触发暂停）。
+warp_temp_hot() {
+    WARP_GUARD_REASON=""
+    local rt ct
+    rt=$(get_real_temp)
+    ct=$(get_cpu_temp)
+    if [ "$rt" -gt 0 ] && [ "$rt" -ge "$SAFE_TEMP_CEILING" ] 2>/dev/null; then
+        WARP_GUARD_REASON="电池温度 ${rt} >= ${SAFE_TEMP_CEILING}"
+        return 0
+    fi
+    if [ "$ct" -gt 0 ] && [ "$ct" -ge "$CPU_TEMP_CEILING" ] 2>/dev/null; then
+        WARP_GUARD_REASON="CPU/SoC温度 ${ct} >= ${CPU_TEMP_CEILING}"
+        return 0
+    fi
+    return 1
+}
+
 # ==================== CLI 单次动作模式 ====================
 # @author bomo v1.2: 事件驱动热开关——App/tile 点击时经 su 直接调用：
 #   sh warp_charge.sh apply    （开：安全检查通过后立即应用 WARP）
@@ -193,12 +230,10 @@ restore_warp_charge() {
 # 读到 enabled=0 不再应用，最终状态正确。
 case "$1" in
     apply)
-        # 单次安全检查（与主循环同条件）：充电中 + 非游戏 + 双温度未超标
+        # 单次安全检查（与主循环同条件）：充电中 + 温度未超标。
+        # @author bomo v1.4.2: 原「非游戏」条件撤除（游戏不再是单独暂停条件）。
         if ! is_charging; then exit 0; fi
-        if [ -f "$FILTERED_LIST" ] && is_game_running; then exit 0; fi
-        rt=$(get_real_temp); ct=$(get_cpu_temp)
-        [ "$rt" -ge "$SAFE_TEMP_CEILING" ] 2>/dev/null && exit 0
-        [ "$ct" -ge "$CPU_TEMP_CEILING" ] 2>/dev/null && exit 0
+        if warp_temp_hot; then exit 0; fi
         apply_warp_charge
         exit 0
         ;;
@@ -265,6 +300,9 @@ init_warp_charge
 LAST_LOG_STATE="init"
 GAME_ACTIVE=0
 PREV_CHARGING=0
+# @author bomo v1.4.2: 补初始化——此前 WARP_ACTIVE 未赋值，导致心跳里
+# "亮屏快充=" 打印为空，且「游戏退出后立即恢复」因条件 `= "0"` 不成立被静默跳过。
+WARP_ACTIVE=0
 loop_count=0
 
 # ==================== 守护循环 ====================
@@ -297,47 +335,36 @@ while true; do
         if [ "$PREV_CHARGING" = "0" ]; then
             PREV_CHARGING=1
             _log "检测到充电接入"
-            # 充电接入时立即检测游戏, 消除 32 秒周期窗口内伪装开跑的风险
+            # 充电接入时立即检测游戏（游戏态仅入日志，不再作为暂停条件）
             update_game_active
-            # 首次充电：仅非游戏时立即应用亮屏快充
-            if [ "$GAME_ACTIVE" = "0" ]; then
+            # 首次充电：温度正常即立即应用亮屏快充
+            if ! warp_temp_hot; then
                 apply_warp_charge
-                _log "[亮屏快充] 已激活（充电接入）"
+                _log "[亮屏快充] 已激活（充电接入｜游戏=${GAME_ACTIVE}）"
             fi
         fi
 
-        if [ "$GAME_ACTIVE" = "1" ]; then
-            # 游戏中: 停亮屏快充（shell-temp 伪装骗温控 → SoC 升温危险）
+        # @author bomo v1.4.2: 暂停与否只看温度——原「游戏运行中一律暂停」已撤除，
+        # 改为游戏与温度共同决定（游戏态只影响日志，温度线与非游戏一致）。
+        real_temp=$(get_real_temp)
+        cpu_temp=$(get_cpu_temp)
+
+        if warp_temp_hot; then
+            # 温度超限保护（电池 / CPU-SoC）
             if [ "$WARP_ACTIVE" = "1" ]; then
                 restore_warp_charge
-                _log "游戏运行中，亮屏快充已暂停(系统温控接管)"
+                _log "⚠ 安全保护：${WARP_GUARD_REASON}，亮屏快充已暂停"
             fi
+            _log_status "safe_stop" "亮屏快充已暂停（${WARP_GUARD_REASON}｜游戏=${GAME_ACTIVE}）"
         else
-            real_temp=$(get_real_temp)
-            cpu_temp=$(get_cpu_temp)
-
-            if [ "$real_temp" -gt 0 ] && [ "$real_temp" -ge "$SAFE_TEMP_CEILING" ] 2>/dev/null; then
-                # 电池过热保护
-                if [ "$WARP_ACTIVE" = "1" ]; then
-                    restore_warp_charge
-                    _log "⚠ 安全保护：电池温度 ${real_temp} >= ${SAFE_TEMP_CEILING}，亮屏快充已暂停"
-                fi
-                _log_status "safe_stop" "亮屏快充已暂停 (电池温度=${real_temp})"
-            elif [ "$cpu_temp" -gt 0 ] && [ "$cpu_temp" -ge "$CPU_TEMP_CEILING" ] 2>/dev/null; then
-                # CPU/SoC 过热保护（防 PMIC 硬复位）
-                if [ "$WARP_ACTIVE" = "1" ]; then
-                    restore_warp_charge
-                fi
-                _log "⚠ 安全保护：CPU/SoC温度 ${cpu_temp} >= ${CPU_TEMP_CEILING}，亮屏快充已暂停"
-                _log_status "cpu_safe_stop" "CPU过热已暂停 (CPU=${cpu_temp})"
-            else
-                # 正常: 周期性重应用（防 horae testmode 被系统重置）
-                if [ $(( loop_count % WARP_REAPPLY_CYCLE )) -eq 0 ]; then
-                    apply_warp_charge
-                fi
-                # cool_down 每轮对抗（系统亮屏策略刷新会重写 5）
-                apply_cool_down_override
+            # 正常：游戏中也保持亮屏快充（温度未到即不限）
+            _log_status "warp_on" "亮屏快充运行中（游戏=${GAME_ACTIVE}｜电池=${real_temp}｜CPU=${cpu_temp}）"
+            # 周期性重应用（防 horae testmode 被系统重置）
+            if [ $(( loop_count % WARP_REAPPLY_CYCLE )) -eq 0 ]; then
+                apply_warp_charge
             fi
+            # cool_down 每轮对抗（系统亮屏策略刷新会重写 5）
+            apply_cool_down_override
         fi
 
     else
