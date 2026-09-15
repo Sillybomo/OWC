@@ -71,8 +71,17 @@ TEMP_RESUME_BATT=420            # 电池恢复线（0.1°C）——暂停后须�
 #   教训：**恢复线必须与暂停线同口径 + 留够死区**。暂停看"最热核"(85°C)，
 #   恢复也看"最热核"，死区 5°C → 恢复线 80°C。游戏常态最热核 79~83°C，80 可穿越。
 #   暂停线 85°C 不动（PMIC 95°C 硬复位余量，实测游戏态真摸到 86.1°C）。
-TEMP_RESUME_CPU=80000           # CPU 恢复线（m°C，同 get_cpu_temp 的"最热核"口径）
-                                # ≤80°C 才恢复（85/80 滞回死区 5°C）
+# @author bomo v1.4.6（2026-09-15 23:35 三次实测后的根因修正）：CPU 恢复改用「回落幅度」判定。
+#   三次调阈值都没治住抖动（78→72→80），实测日志暴露真因：**游戏态 CPU 最热核在 76~89°C
+#   剧烈抖动（15s 内可跳 10°C）**，任何"固定阈值 + 连续采样"策略都会被这种抖动打穿：
+#     23:31~23:33 六分钟内切换 7 次（85.3→恢复→93.4→恢复→89.2…）。
+#   ⇒ 这不是调参问题，是**判定口径问题**。CPU 恢复不再看绝对温度，改看"相对触发点回落多少"：
+#     暂停瞬间记录 PAUSE_TEMP_CPU（如 93400），恢复条件 = 当前 ≤ PAUSE_TEMP_CPU - CPU_RESUME_DROP。
+#   自适应：触发点越高，恢复门槛相应越高，天然避开"绝对波动带"这个死结。
+#   电池线仍走绝对阈值（电池温度平稳，实测 23:13~23:33 全程 37.5~39.4°C，无抖动问题）。
+CPU_RESUME_DROP=10000           # CPU 恢复回落幅度（m°C）——从触发点回落 ≥10°C 才恢复
+TEMP_RESUME_CPU=80000           # CPU 恢复线（m°C）**兜底上限**：即使回落幅度满足，
+                                # 也不得高于此值才恢复（防"触发点极高→恢复门槛也极高"的边界失控）
 RESUME_CONFIRM=3                # 恢复前连续达标采样次数（3×4s≈12s，防单次尖刺）
 GAME_TEMP_CEILING=480           # 游戏中电池暂停线放宽到 48°C；CPU 线不动（PMIC 安全余量不让步）
                                 # 实测备注（2026-09-15 游戏态）：电池全程 37.7~39.4°C，
@@ -257,14 +266,15 @@ restore_warp_charge() {
 # 而温度未到时游戏不应单独触发暂停）。
 #
 # @author bomo v1.4.3: 改为带滞回的状态机（治 85°C 线上 4 分钟抖 3 次的实测问题）。
+# @author bomo v1.4.6: 恢复判定分双轨——
+#   电池：绝对阈值（≤TEMP_RESUME_BATT），电池温度平稳无需相对判定。
+#   CPU ：**相对回落**（≤暂停时记录的 PAUSE_TEMP_CPU - CPU_RESUME_DROP）且不高于
+#         TEMP_RESUME_CPU 兜底上限。治"最热核 76~89°C 剧烈抖动"导致的反复翻转。
 #   未暂停(OVERHEAT=0)：触及暂停线才停（游戏态电池线放宽到 GAME_TEMP_CEILING）。
-#   已暂停(OVERHEAT=1)：两条温度线都回到恢复线以下、且连续 RESUME_CONFIRM 次
-#   达标，才真正放行；中间死区（42~46°C / 78~85°C）保持暂停不翻转。
-#   CLI apply 单次调用时 OVERHEAT 初值 0，行为退化为 v1.4.2 的单次暂停线检查，
-#   语义兼容。游戏态切换只影响"暂停触发线"，不影响恢复线（恢复线更严，统一）。
+#   CLI apply 单次调用时 OVERHEAT 初值 0，行为退化为 v1.4.2 的单次暂停线检查，语义兼容。
 warp_temp_hot() {
     WARP_GUARD_REASON=""
-    local rt ct batt_pause
+    local rt ct batt_pause cpu_ok
     rt=$(get_real_temp)
     ct=$(get_cpu_temp)
     # 传感器读数异常时按"未回恢复线"处理（保守，不误恢复）
@@ -272,17 +282,35 @@ warp_temp_hot() {
     [ "$ct" -gt 0 ] 2>/dev/null || ct=9999999
 
     if [ "$OVERHEAT" = "1" ]; then
-        if [ "$rt" -le "$TEMP_RESUME_BATT" ] && [ "$ct" -le "$TEMP_RESUME_CPU" ]; then
+        # 电池：绝对恢复线
+        local batt_ok=0 cpu_target
+        [ "$rt" -le "$TEMP_RESUME_BATT" ] && batt_ok=1
+        # CPU：相对回落（触发点 - 回落幅度），并以绝对上限兜底
+        # @author bomo v1.4.6: 回落判定解决"最热核抖动打穿固定阈值"的根因
+        # 注意：不用 bash 三元表达式（$(( a ? b : c ))），mksh 兼容性差，用 if 赋值
+        # ★ 取「较大者」：回落目标(触发点-10°C) 与 绝对上限 取 max。
+        #   取 max 的理由：回落目标是主判据，绝对上限只是防止"触发点极高 → 恢复门槛
+        #   高得离谱"的兜底。若取 min，回落判定会被 80000 架空 ⇒ 等于没改（实测踩到）。
+        cpu_target="$TEMP_RESUME_CPU"
+        if [ "$PAUSE_TEMP_CPU" -gt 0 ] 2>/dev/null; then
+            cpu_target=$(( PAUSE_TEMP_CPU - CPU_RESUME_DROP ))
+            [ "$cpu_target" -lt "$TEMP_RESUME_CPU" ] && cpu_target="$TEMP_RESUME_CPU"
+        fi
+        local cpu_ok=0
+        [ "$ct" -le "$cpu_target" ] && cpu_ok=1
+
+        if [ "$batt_ok" = "1" ] && [ "$cpu_ok" = "1" ]; then
             TEMP_CONFIRM=$(( TEMP_CONFIRM + 1 ))
             if [ "$TEMP_CONFIRM" -ge "$RESUME_CONFIRM" ]; then
                 OVERHEAT=0
                 TEMP_CONFIRM=0
+                PAUSE_TEMP_CPU=0
                 return 1
             fi
             WARP_GUARD_REASON="恢复确认中 ${TEMP_CONFIRM}/${RESUME_CONFIRM}（电池=${rt}｜CPU=${ct}）"
         else
             TEMP_CONFIRM=0
-            WARP_GUARD_REASON="未回恢复线（电池=${rt}/${TEMP_RESUME_BATT}｜CPU=${ct}/${TEMP_RESUME_CPU}）"
+            WARP_GUARD_REASON="未回恢复线（电池=${rt}/${TEMP_RESUME_BATT}｜CPU=${ct}需≤${cpu_target}）"
         fi
         return 0
     fi
@@ -295,12 +323,15 @@ warp_temp_hot() {
         WARP_GUARD_SRC="battery"
         OVERHEAT=1
         TEMP_CONFIRM=0
+        PAUSE_TEMP_CPU=0
         return 0
     fi
     if [ "$ct" -ge "$CPU_TEMP_CEILING" ] 2>/dev/null; then
         WARP_GUARD_REASON="CPU/SoC温度 ${ct} >= ${CPU_TEMP_CEILING}"
         # @author bomo v1.4.5: CPU 过热 —— 保持 cool_down=0，不牺牲充电功率
         WARP_GUARD_SRC="cpu"
+        # @author bomo v1.4.6: 记录触发温度，供恢复时按"回落幅度"判定
+        PAUSE_TEMP_CPU="$ct"
         OVERHEAT=1
         TEMP_CONFIRM=0
         return 0
@@ -406,6 +437,7 @@ WARP_ACTIVE=0
 OVERHEAT=0            # 1 = 处于过热暂停（滞回死区内不恢复）
 TEMP_CONFIRM=0        # 恢复线以下连续采样计数
 WARP_GUARD_SRC=""     # @author bomo v1.4.5: 过热来源（cpu / battery），决定是否交还 cool_down
+PAUSE_TEMP_CPU=0      # @author bomo v1.4.6: CPU 暂停瞬间的触发温度（m°C），供回落幅度判定
 PAUSE_SINCE=0         # 本次过热暂停起始时间戳（秒），0=未暂停
 TOGGLE_HOUR=""        # 切换计数所在小时
 TOGGLE_COUNT=0        # 该小时内 暂停/恢复 切换次数

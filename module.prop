@@ -1,6 +1,6 @@
 id=OWC
 name=OWC亮屏快充
-version=v1.4.5
-versionCode=14
+version=v1.4.6
+versionCode=15
 author=bomo
-description=⚡OWC 亮屏快充⚡ 充电时停 ORMS + horae testmode + 壳温伪装34°C → 亮屏满功率快充；电池≥46°C/CPU≥85°C 暂停（滞回≤42/≤80 恢复，游戏中电池放宽48°C）；CPU 过热暂停不再牺牲充电功率；可与其他模块独立启停
+description=⚡OWC 亮屏快充⚡ 充电时停 ORMS + horae testmode + 壳温伪装34°C → 亮屏满功率快充；电池≥46°C/CPU≥85°C 暂停；CPU 恢复按「触发点回落10°C」自适应判定（治游戏态抖动）；CPU 过热不牺牲充电功率
