@@ -49,6 +49,56 @@ get_cpu_temp() {
     echo "$max"
 }
 
+# @author bomo v1.4.7（2026-09-16 安全阀重构）：
+# GPU 真实温度读取（m°C）。PLZ110 实测节点为 gpuss-0 ~ gpuss-10（11 个核），
+# 与 CPU 节点（cpu-* / cpullc-*）完全分离，因此必须独立读取——只盯 CPU 会漏掉
+# GPU 先于 CPU 过热的情形（游戏高负载时 GPU 常是先行热源）。
+# 同样排除 trip 占位节点，取最大值。
+get_gpu_temp() {
+    local max=0 t type
+    for z in /sys/class/thermal/thermal_zone*; do
+        [ -f "$z/temp" ] || continue
+        type=$(cat "$z/type" 2>/dev/null)
+        case "$type" in
+            *gpu*|*GPU*|*gpuss*) ;;
+            *) continue ;;
+        esac
+        case "$type" in
+            *trip*|*TRIP*) continue ;;
+        esac
+        t=$(cat "$z/temp" 2>/dev/null)
+        case "$t" in
+            ''|*[!0-9\-]*) continue ;;
+        esac
+        [ "$t" -eq 95000 ] 2>/dev/null && continue
+        [ "$t" -gt "$max" ] 2>/dev/null && max="$t"
+    done
+    echo "$max"
+}
+
+# @author bomo v1.4.7：
+# 壳温读取（m°C）。PLZ110 实测有三个壳温面：shell_front / shell_frame / shell_back，
+# 取三者最大值（最热面最能反映握持体感与内部热积累）。
+# 壳温是"用户体验线"：CPU/GPU/电池是"器件安全线"，两者互补——器件没到临界但
+# 机身烫手时，也应熔断避免握着烫手。
+get_shell_temp() {
+    local max=0 t v
+    for z in /sys/class/thermal/thermal_zone*; do
+        [ -f "$z/temp" ] || continue
+        t=$(cat "$z/type" 2>/dev/null)
+        case "$t" in
+            *shell*) ;;
+            *) continue ;;
+        esac
+        v=$(cat "$z/temp" 2>/dev/null)
+        case "$v" in
+            ''|*[!0-9\-]*) continue ;;
+        esac
+        [ "$v" -gt "$max" ] 2>/dev/null && max="$v"
+    done
+    echo "$max"
+}
+
 # @author bomo
 # 电池真实温度读取（0.1°C 单位）。优先 battery，回退 Battery（大小写因机型而异）。
 get_real_temp() {
