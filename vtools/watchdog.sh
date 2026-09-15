@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # @author bomo
 # OWC watchdog — 防止 warp_charge 守护被系统杀掉后无人拉起
-# （SIGKILL/内存回收等场景）。机制与 OPP watchdog.sh 同源：
+# （SIGKILL/内存回收等场景）。机制：
 # 每 120s 检查存活，死亡自动拉起，连续 5 次失败冷却 300s。
 # OWC 只有一个业务守护，per-script 计数退化为单计数。
 
@@ -38,7 +38,7 @@ cooldown_expired() {
     return 1
 }
 
-# 日志轮转（256KB 裁 64KB，与 OPP watchdog 一致）
+# 日志轮转（256KB 裁 64KB）
 if [ -f "$TMPDIR/watchdog.log" ] && [ "$(wc -c < "$TMPDIR/watchdog.log")" -gt 262144 ]; then
     tail -c 65536 "$TMPDIR/watchdog.log" > "${TMPDIR}/watchdog.log.tmp" 2>/dev/null
     mv "${TMPDIR}/watchdog.log.tmp" "$TMPDIR/watchdog.log" 2>/dev/null

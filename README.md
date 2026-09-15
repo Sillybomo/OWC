@@ -2,7 +2,7 @@
 
 > ⚡ 解锁 ColorOS 亮屏充电限速，控制中心一键热切换，边玩边满功率快充
 >
-> @author bomo · Inspired by AaTempSpoof & OPP 官方全局扩展
+> @author bomo · Inspired by AaTempSpoof
 
 > [!IMPORTANT]
 > **目前仅在一加 15T（PLZ110 · ColorOS 16 · Android 16）上完整实测可用。**
@@ -10,7 +10,7 @@
 > **需要自行测试**。本项目为个人自用工具开源，**随缘更新**，不承诺适配。
 > 适配反馈请附 `tmp/warp_charge.log` 与机型信息。
 
-[![Version](https://img.shields.io/badge/version-v1.4.0-blue)]()
+[![Version](https://img.shields.io/badge/version-v1.4.1-blue)]()
 [![Platform](https://img.shields.io/badge/platform-ColorOS%2016%20%2F%20Android%2016-green)]()
 [![Root](https://img.shields.io/badge/root-Magisk%20%7C%20KernelSU-orange)]()
 
@@ -78,7 +78,7 @@ App 只是遥控器，全部业务逻辑在 shell 守护中（单一实现，防
 
 ## ⛔ 兼容性限制
 
-- **不与其他充电类模块兼容**（OPP / charging_spoof / AaTempSpoof 及一切写
+- **不与其他充电类模块兼容**（AaTempSpoof 及一切写
   `cool_down` / `oplus_chg` 温度 / `shell-temp` / horae 的模块）——OWC 直接写
   充电内核节点，共存会互相覆盖，充电行为不可预期。安装脚本会自动检测并
   **拒绝安装**。
@@ -150,7 +150,6 @@ adb install owc-app-debug.apk
 ## 致谢
 
 - [AaTempSpoof](https://github.com/) — 温度伪装思路与 watchdog 模式来源
-- [OPP 官方全局扩展](https://github.com/) — 调度与温控体系启发
 - [Wangshu (Aestas)](https://github.com/) — 有界等待 / 单一实现 / 防误杀哲学
 - [GKD](https://github.com/gkd-li/gkd) — TileService 注册控制中心参考
 

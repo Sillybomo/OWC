@@ -44,8 +44,12 @@ DEV=$(getprop ro.product.device)
 MODEL=$(getprop ro.product.model)
 ui_print "- 设备: $MODEL ($DEV)"
 
-case "$DEV" in
-    plz110|PLZ110)
+# @author bomo v1.4.0: 机型识别改用 device+model+name+board 联合匹配（统一大写比较）。
+# 本机 ro.product.device=OP64DDL1（PLZ110 是 ro.product.model, board=canoe），
+# 此前只匹配 device 会把正版机型误判为"未验证"，安装时卡在按键确认超时。
+DEVID=$(echo "$DEV $MODEL $(getprop ro.product.name) $(getprop ro.product.board)" | tr 'a-z' 'A-Z')
+case "$DEVID" in
+    *PLZ110*|*OP64DDL1*|*CANOE*)
         ui_print "- 已验证机型: 一加 15T (PLZ110) ✓"
         ;;
     *)
@@ -73,7 +77,9 @@ esac
 
 # ---------- 2. 充电类模块冲突检测（命中即终止） ----------
 CONFLICT=""
-for m in OPP AaTempSpoof OPP_v1.3.7 charging_spoof; do
+# @author bomo v1.4.0: 名单只列广扫描正则覆盖不到的同类模块；
+# 直接写 cool_down / shell-temp / horae 等充电节点的模块由下面的广扫描兜住。
+for m in AaTempSpoof; do
     [ -d "/data/adb/modules/$m" ] && CONFLICT="$CONFLICT $m"
 done
 # 广扫描: 已启用模块中脚本含充电节点写操作的

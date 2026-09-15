@@ -1,10 +1,10 @@
 #!/system/bin/sh
 # @author bomo
 # OWC 亮屏快充模块 service.sh — 拉起 warp_charge 守护 + watchdog
-# 模式与 OPP init_vtools 一致：脚本拷入 tmp/ 后运行（守护的 MODDIR 指向 tmp），
+# 运行模式：脚本拷入 tmp/ 后运行（守护的 MODDIR 指向 tmp），
 # lib_common.sh / game_blacklist.txt 随行拷贝（守护 source 依赖）。
 
-# 等待开机完成（有界等待 300s，借鉴 OPP v1.3.28：无超时会在系统异常时永久挂起）
+# 等待开机完成（有界等待 300s：无超时会在系统异常时永久挂起）
 BOOT_WAIT_MAX=60   # 60 次 × 5s = 300s
 BOOT_WAIT_N=0
 while [ "$(getprop sys.boot_completed)" != "1" ]; do
@@ -38,8 +38,7 @@ if [ -f "$BASEDIR/lib_common.sh" ]; then
     . "$BASEDIR/lib_common.sh"
 fi
 
-# @author bomo: 启动守护统一入口（cmdline 验证查杀 + lib 随行拷贝，
-# 与 OPP v1.3.28 launch_daemon 同源）
+# @author bomo: 启动守护统一入口（cmdline 验证查杀 + lib 随行拷贝）
 launch_daemon() {
     local name="$1" script="$2"
     kill_verified "$script" TERM

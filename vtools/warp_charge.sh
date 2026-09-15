@@ -1,23 +1,22 @@
 #!/system/bin/sh
 # @author bomo
-# OWC 亮屏快充守护 — 自 OPP v1.3.29 vtools/battery_spoof.sh 分离（2026-09-06）
+# OWC 亮屏快充守护（2026-09-06）
 #
 # 功能：充电时停止 ORMS 服务 + horae testmode + /proc/shell-temp 伪装 34°C，
 #       使系统亮屏时不限充电功率（满功率快充 50W）。
 # 原理：ColorOS 按壳温(/proc/shell-temp)限制亮屏充电功率，壳温伪装为 34°C
 #       即绕过限功率策略；ORMS 是充电调度服务，停止后不做保守限速。
 #
-# 安全栏（继承自 OPP 8-13/8-15/8-19 热失控教训，不可删）：
+# 安全栏（源自 8-13/8-15/8-19 热失控教训，不可删）：
 #   1. 游戏运行中暂停 —— shell-temp 伪装也是骗温控，游戏中继续 = SoC 持续
-#      升温而系统不知情（原 OPP 注释：游戏时继续亮屏快充 = 换条路继续骗温控）
+#      升温而系统不知情（游戏时继续亮屏快充 = 换条路继续骗温控）
 #   2. 电池真实温度 >= SAFE_TEMP_CEILING(46°C) 暂停
 #   3. CPU/SoC >= CPU_TEMP_CEILING(85°C) 暂停（防 PMIC 硬复位 95°C，留 10°C 余量）
 #   4. 充电断开 / 进程退出 → 恢复 ORMS + horae（还原系统状态）
 #
-# 不包含（仍属 OPP battery_spoof）：电池温度伪装(emul_temp/oplus_chg)、
-# 循环次数伪装。两模块同时安装时，OPP 侧有防双开检测自动关闭其 WARP。
+# 不包含：电池温度伪装(emul_temp/oplus_chg)、循环次数伪装。
 #
-# 运行模式与 OPP 一致：service.sh 将本脚本拷入 tmp/ 后运行，
+# 运行模式：service.sh 将本脚本拷入 tmp/ 后运行，
 # $MODDIR 即 tmp 目录，lib_common.sh / game_blacklist.txt 均在同目录。
 
 MODDIR="$(dirname $(readlink -f "$0"))"
@@ -27,15 +26,14 @@ LOCK_FILE="$TMP_DIR/warp_charge.lock"
 BLACKLIST_FILE="$MODDIR/game_blacklist.txt"
 FILTERED_LIST="$TMP_DIR/game_blacklist_f.txt"
 # 公共函数库（is_charging / get_real_temp / get_cpu_temp / rotate_log_file /
-# kill_verified），单一实现原则，防复制漂移（OPP v1.3.15/v1.3.24 两次单位 bug
-# 均为复制漂移产物）
+# kill_verified），单一实现原则，防复制漂移（历史两次单位 bug 均为复制漂移产物）
 . "$MODDIR/lib_common.sh"
 
 # ==================== 可配置参数 ====================
 CHECK_INTERVAL=4                # 检测间隔（秒）。v1.1.1: 8→4，热开关灵敏度优化（用户连点会翻转状态，缩短守护响应窗口）
 GAME_CHECK_CYCLE=4              # 每 N 轮检测一次游戏（约 32 秒）
 WARP_REAPPLY_CYCLE=8            # 每 N 轮重新应用一次 horae testmode（约 64 秒）
-# @author bomo: 阈值语义与 OPP battery_spoof 保持一致（拆分时原样继承）
+# @author bomo: 阈值语义在拆分时原样继承，保持不变
 SAFE_TEMP_CEILING=460           # 电池真实温度上限（0.1°C，460=46°C）
 CPU_TEMP_CEILING=85000          # CPU/SoC 温度上限（m°C，85000=85°C，防 95°C 硬复位）
 # ====================================================
@@ -72,7 +70,7 @@ safe_dumpsys() {
     timeout "$DUMP_TIMEOUT" dumpsys "$@" 2>/dev/null
 }
 
-# Android 16 兼容的前台游戏检测（原样继承自 OPP battery_spoof）
+# Android 16 兼容的前台游戏检测
 is_game_running() {
     [ ! -f "$FILTERED_LIST" ] && return 1
 
@@ -88,8 +86,7 @@ is_game_running() {
     echo "$pkg" | grep -qFf "$FILTERED_LIST" 2>/dev/null
 }
 
-# 游戏状态更新（原 OPP 共享权重文件 GAME_WEIGHT_FILE 供 thermal_guard 使用，
-# OWC 无 thermal_guard，移除该共享；游戏检测节律与节流周期原样保留）
+# 游戏状态更新（本模块无跨脚本共享权重文件；游戏检测节律与节流周期原样保留）
 update_game_active() {
     if is_game_running; then
         [ "$GAME_ACTIVE" = "0" ] && _log "检测到游戏运行"
@@ -108,7 +105,7 @@ update_game_active() {
     fi
 }
 
-# ==================== 亮屏快充核心（原样继承自 OPP battery_spoof.sh） ====================
+# ==================== 亮屏快充核心 ====================
 
 # 检测并记录ORMS服务状态（启动时一次）
 init_warp_charge() {
@@ -213,7 +210,7 @@ esac
 
 # ==================== 主逻辑 ====================
 
-# 防重复启动（PID + cmdline 双验证，防 PID 复用误判——继承 OPP 模式）
+# 防重复启动（PID + cmdline 双验证，防 PID 复用误判）
 if [ -f "$LOCK_FILE" ]; then
     old_pid=$(cat "$LOCK_FILE" 2>/dev/null)
     if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
@@ -241,7 +238,7 @@ trap cleanup EXIT INT TERM
 
 _log "OWC 亮屏快充守护进程启动 (PID=$$)"
 
-# 等待系统就绪（有界等待，借鉴 OPP v1.3.28 修复：无超时会在系统异常时永久挂起）
+# 等待系统就绪（有界等待：无超时会在系统异常时永久挂起）
 BOOT_WAIT_MAX=60   # 60 次 × 3s = 180s
 BOOT_WAIT_N=0
 while [ "$(getprop sys.boot_completed)" != "1" ]; do
@@ -274,8 +271,8 @@ loop_count=0
 while true; do
     current_charging=0
 
-    # ---- 游戏检测（循环顶层, 充电/放电均实时更新；OPP v1.3.27 教训：
-    #      埋进 is_charging 分支会导致放电场景状态陈旧）----
+    # ---- 游戏检测（循环顶层, 充电/放电均实时更新：埋进 is_charging
+    #      分支会导致放电场景状态陈旧）----
     if [ $(( loop_count % GAME_CHECK_CYCLE )) -eq 0 ]; then
         update_game_active
     fi

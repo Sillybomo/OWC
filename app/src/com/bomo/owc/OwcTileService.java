@@ -10,8 +10,8 @@ import android.service.quicksettings.TileService;
  *   /data/adb/owc/enabled（1=开 0=关），
  * 由 OWC Magisk 模块的 warp_charge.sh 守护读取并热切换（≤8s 生效）。
  * WARP 执行与全部安全栏（游戏暂停/电池46°C/CPU85°C/断充恢复）都在
- * 模块守护侧，App 不复制任何业务逻辑（防复制漂移，OPP v1.3.15/v1.3.24
- * 两次单位 bug 即复制漂移产物）。
+ * 模块守护侧，App 不复制任何业务逻辑（防复制漂移，历史上两次单位 bug
+ * 即复制漂移产物）。
  *
  * @author bomo
  */

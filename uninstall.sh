@@ -9,7 +9,7 @@
 #   5. 清除模块外产物：/data/adb/owc/（状态文件）
 # 注：
 #   - /proc/shell-temp 写过的伪装值无需手动清除——horae testmode false
-#     后数据源切回真实传感器（与 OPP battery_spoof cleanup 行为一致）。
+#     后数据源切回真实传感器。
 #   - 模块目录本身（含 tmp/ 日志）由管理器随 uninstall.sh 执行后整体删除。
 
 MODDIR=${0%/*}
@@ -63,7 +63,7 @@ if [ -f "$COOL_DOWN_NODE" ]; then
 fi
 
 # 4. 清扫电池类 emul_temp 残留（防御性: 当前版本守护不写 emul, 但保留
-#    清扫以防历史版本/手动实验残留致盲内核温控——借鉴 OPP sweep_emul_residue）
+#    清扫以防历史版本/手动实验残留致盲内核温控）
 for z in /sys/class/thermal/thermal_zone*; do
     [ -f "$z/emul_temp" ] || continue
     t=$(cat "$z/type" 2>/dev/null)
