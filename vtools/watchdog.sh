@@ -4,6 +4,13 @@
 # （SIGKILL/内存回收等场景）。机制：
 # 每 120s 检查存活，死亡自动拉起，连续 5 次失败冷却 300s。
 # OWC 只有一个业务守护，per-script 计数退化为单计数。
+#
+# @author bomo v1.4.10（2026-09-16）：**运行位置统一到 vtools/**。
+#   watchdog 自身跑在 vtools/，被拉起的 warp_charge.sh 也在 vtools/ 原地运行，
+#   不再往 tmp/ 拷贝副本（消除"双份相同脚本、无法判断哪个在跑"的歧义）。
+#   lib_common.sh 由 warp_charge.sh 以其 $MODDIR 引入（MODDIR=vtools），故此处
+#   也无需再往 tmp/ 拷 lib。
+#   TMPDIR 仍指向 tmp/ —— 那是**运行时产物**（日志/锁/过滤名单）的唯一住处。
 
 BASEDIR="$(dirname $(readlink -f "$0"))"
 MODDIR="$(dirname "$BASEDIR")"
@@ -51,11 +58,10 @@ while true; do
         cooldown_expired || true
     elif ! pgrep -f "warp_charge.sh" > /dev/null 2>&1; then
         _log "⚠ warp_charge 不在运行, 尝试拉起"
-        [ -f "$BASEDIR/lib_common.sh" ] && cp -af "$BASEDIR/lib_common.sh" "$TMPDIR/lib_common.sh"
-        cp -af "$BASEDIR/warp_charge.sh" "$TMPDIR/warp_charge.sh" 2>/dev/null
-        cp -af "$BASEDIR/game_blacklist.txt" "$TMPDIR/game_blacklist.txt" 2>/dev/null
-        chmod 755 "$TMPDIR/warp_charge.sh" 2>/dev/null
-        nohup sh "$TMPDIR/warp_charge.sh" > /dev/null 2>&1 &
+        # @author bomo v1.4.10: 原地拉起（vtools/），不再拷贝到 tmp/
+        chmod 755 "$BASEDIR/warp_charge.sh" 2>/dev/null
+        rm -f "$TMPDIR/warp_charge.sh" "$TMPDIR/lib_common.sh" 2>/dev/null
+        nohup sh "$BASEDIR/warp_charge.sh" > /dev/null 2>&1 &
         sleep 3
         if pgrep -f "warp_charge.sh" > /dev/null 2>&1; then
             _log "✓ warp_charge 已恢复 (PID=$(pgrep -f warp_charge.sh | head -1))"

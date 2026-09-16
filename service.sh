@@ -1,8 +1,16 @@
 #!/system/bin/sh
 # @author bomo
 # OWC 亮屏快充模块 service.sh — 拉起 warp_charge 守护 + watchdog
-# 运行模式：脚本拷入 tmp/ 后运行（守护的 MODDIR 指向 tmp），
-# lib_common.sh / game_blacklist.txt 随行拷贝（守护 source 依赖）。
+# @author bomo v1.4.10（2026-09-16）：**运行位置统一到 vtools/**，tmp/ 只放运行时产物。
+#   背景：原设计把脚本拷入 tmp/ 再运行，导致 tmp/ 与 vtools/ 各存一份**内容相同**的
+#   warp_charge.sh。实测核查时无法一眼判断"哪个才是真正在跑的"，且曾因"改了一份、
+#   跑的是另一份"造成版本号滞后（module.prop 显示 v1.4.8 而脚本已是 v1.4.9）。
+#   warp_charge.sh 内的路径逻辑本就兼容两种位置：
+#     MODDIR="$(dirname $(readlink -f "$0"))" → 在 vtools/ 下即 vtools
+#     TMP_DIR="$MODDIR/../tmp"                → 仍正确指向 tmp/
+#   故本次**只改启动方**，脚本零改动（最小侵入）。
+#   lib_common.sh 用 `. "$MODDIR/lib_common.sh"` 引入 —— MODDIR=vtools 时同目录命中，
+#   亦无需再往 tmp/ 拷贝。
 
 # 等待开机完成（有界等待 300s：无超时会在系统异常时永久挂起）
 BOOT_WAIT_MAX=60   # 60 次 × 5s = 300s
@@ -32,22 +40,24 @@ _log() {
     fi
 }
 
-# 公共函数库（kill_verified 等）
+# @author bomo v1.4.10: 公共函数库（kill_verified 等）——
+#   改为**直接从 vtools/ 引入**（不再拷到 tmp/ 再引入），与"脚本原地运行"保持一致。
 if [ -f "$BASEDIR/lib_common.sh" ]; then
-    cp -af "$BASEDIR/lib_common.sh" "$TMPDIR/lib_common.sh"
     . "$BASEDIR/lib_common.sh"
 fi
 
-# @author bomo: 启动守护统一入口（cmdline 验证查杀 + lib 随行拷贝）
+# @author bomo v1.4.10: 启动守护统一入口——**直接在 vtools/ 原地运行**，
+#   不再拷贝到 tmp/（消除双份副本与版本歧义）。
+#   lib_common.sh 由脚本自身以 $MODDIR/lib_common.sh 引入，同级即可命中。
 launch_daemon() {
     local name="$1" script="$2"
     kill_verified "$script" TERM
     sleep 1
-    [ -f "$BASEDIR/lib_common.sh" ] && cp -af "$BASEDIR/lib_common.sh" "$TMPDIR/lib_common.sh"
-    cp -af "$BASEDIR/$script" "$TMPDIR/$script"
-    chmod 755 "$TMPDIR/$script"
-    nohup sh "$TMPDIR/$script" > /dev/null 2>&1 &
-    _log "已启动 $name (script=$script)"
+    chmod 755 "$BASEDIR/$script" 2>/dev/null
+    # 清理历史遗留的 tmp/ 脚本副本（v1.4.9 及更早版本会拷进去）
+    rm -f "$TMPDIR/$script" "$TMPDIR/lib_common.sh" 2>/dev/null
+    nohup sh "$BASEDIR/$script" > /dev/null 2>&1 &
+    _log "已启动 $name (script=$BASEDIR/$script)"
 }
 
 # 用户热开关状态目录（控制中心 tile / OWC App 通过 su 写入 0/1）

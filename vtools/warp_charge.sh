@@ -130,7 +130,26 @@ TRIP_RESUME_CPU=$(( TRIP_CPU - TRIP_RESUME_GAP ))     # 89000
 TRIP_RESUME_GPU=$(( TRIP_GPU - TRIP_RESUME_GAP ))     # 89000
 TRIP_RESUME_BATT=$(( TRIP_BATT - 30 ))                # 420（0.1°C 单位，=42°C，同样 3°C 死区）
 TRIP_RESUME_SHELL=$(( TRIP_SHELL - TRIP_RESUME_GAP )) # 45000
-RESUME_CONFIRM=3                # 复归确认：连续 3 次（≈12s）全部低于**复归线**才复归，防抖
+# @author bomo v1.4.10（2026-09-16 实测复盘）：**复归确认由「连续」改为「累计」**。
+#   背景：v1.4.8 的死区 + 连续 3 次确认，在真实游戏负载下**从未走完过 3/3**。
+#   实测证据（2026-09-16 00:18~00:21，异环 + 亮屏快充，降频前）：
+#     00:18:22 CPU=83300 → 1/3 ／ 00:18:27 CPU=94200 → 熔断持续（+10900，跨过熔断线）
+#     00:19:21 CPU=91500 → 1/3 ／ 00:19:27 CPU=93800 → 熔断持续（+2300）
+#     00:19:39 CPU=91500 → 1/3 ／ 00:19:44 CPU=93800 → 熔断持续
+#     00:20:45 CPU=90700 → 1/3 ／ 00:20:51 CPU=93400 → 熔断持续
+#   全日志统计：`1/3` 出现 4 次，`2/3` 与 `3/3` **各 0 次**。
+#   ⇒ 分子恒为 1，紧接着必被一次撞线清零。**单次采样尖刺（±5.5°C）比确认窗口更宽**，
+#     于是"连续 N 次"是个永远攒不满的窗口 —— 故 v1.4.10 起改为**累计**：
+#     达标次数累积，不再因单次尖刺归零；仅当"连续尖刺"超出容差才重置。
+#   ★ 语义澄清：这**不是**把保险丝降级成调速器（用户 v1.4.7 拍板语义不变）——
+#     复归仍要求四路全部落回复归线以下，只是把"必须连续"放宽为"允许中间有尖刺"。
+#     熔断判定（TRIP_*）与保险丝行为**零变化**。
+#
+#   RESUME_CONFIRM 语义：复归所需的**累计**达标采样次数。
+#   RESUME_SPIKE_TOLERANCE 语义：允许夹在达标之间、但未撞熔断线的**尖刺**次数，
+#     连续尖刺超过此值即认为"并未真冷却"，累计清零重来（防尖刺密集时误判冷却）。
+RESUME_CONFIRM=3                # 复归确认：累计 3 次（≈12s）达标即复归（v1.4.10 起非连续）
+RESUME_SPIKE_TOLERANCE=2        # 尖刺容差：连续 2 次尖刺（未撞熔断线）即清零累计，防误判
 # ====================================================
 
 # ====================================================
@@ -307,7 +326,15 @@ apply_warp_charge() {
 # @author bomo v1.4.7（2026-08-16 用户拍板）：**撤销分级，统一完全交还**。
 #   用户定调"熔断 = 完全交还系统，由系统接管"（保险丝语义），故不再有 cpu_hot 分支。
 #   $1 形参保留仅作向后兼容（旧调用点传参不再有语义差异）。
+# @author bomo v1.4.10（2026-09-16）：**新增 $1 归因标注**，治日志里的"来源=unknown"。
+#   背景：实测 2026-09-16 00:08/00:11/07:22 出现 `来源=unknown` —— 那是因为
+#   WARP_GUARD_SRC 只在真熔断（warp_temp_hot 内）时才被赋值，而守护退出 /
+#   用户关磁贴 / 断充 都会直接调 restore_warp_charge，此时 SRC 仍为空。
+#   ⇒ 归因不再依赖"上一次熔断留存的残留值"，改由调用方显式传入：
+#     $1 = 过热来源（cpu/gpu/battery/shell）或语义标注（overheat/shutdown/user）。
+#     未传时回退到 WARP_GUARD_SRC，再空则记为 "none"（不再输出误导性的 unknown）。
 restore_warp_charge() {
+    local restore_src="${1:-${WARP_GUARD_SRC:-none}}"
     # 恢复horae温控HAL（退出测试模式）
     dumpsys horae testmode false 2>/dev/null
 
@@ -324,8 +351,9 @@ restore_warp_charge() {
     # @author bomo v1.4.7: 保留 $1 形参仅为向后兼容旧调用点，语义统一为完全交还。
     #   历史沿革：v1.4.5 曾按来源分级（cpu_hot 保持满功率通路）以治 15W 事故，
     #   但用户最终要求"熔断 = 完全交还系统"，故撤销分级。
+    # @author bomo v1.4.10: $1 现用于**归因标注**（见上），不影响交还行为本身。
     restore_cool_down
-    _log "[亮屏快充] 已交还 cool_down 降流控制权（来源=${WARP_GUARD_SRC:-unknown}）"
+    _log "[亮屏快充] 已交还 cool_down 降流控制权（来源=${restore_src}）"
 
     WARP_ACTIVE=0
     _log "[亮屏快充] 已恢复 ORMS + horae"
@@ -392,23 +420,41 @@ warp_temp_hot() {
     # 统一温度快照串，供日志/原因复用（避免各处重复拼装）
     local snap="电池=${rt}｜CPU=${ct}｜GPU=${gt}｜壳温=${st}"
 
-    # ---- 已熔断：四路全部落回复归线以下 + 连续确认才复归 ----
+    # ---- 已熔断：四路全部落回复归线以下 + **累计**确认才复归 ----
+    # @author bomo v1.4.10: 由「连续 N 次」改为「累计 N 次 + 尖刺容差」。
+    #   原实现的 TEMP_CONFIRM 只要遇到一次未达标就清零，而实测尖刺（±5.5°C）
+    #   远比单次达标更频繁，导致分子恒为 1（详见 RESUME_CONFIRM 处实测证据）。
+    #   现语义：达标 → 累加；尖刺（未撞熔断线但高于复归线）→ 累加 SPK_COUNT，
+    #   连续尖刺超过 RESUME_SPIKE_TOLERANCE 说明没在真冷却 ⇒ 累计清零重来；
+    #   撞熔断线 ⇒ 立即清零（仍是硬否定，只是不再被单次尖刺否定）。
     if [ "$OVERHEAT" = "1" ]; then
         if [ "$any_hot" = "0" ] && [ "$any_above_resume" = "0" ]; then
             TEMP_CONFIRM=$(( TEMP_CONFIRM + 1 ))
+            SPK_COUNT=0
             if [ "$TEMP_CONFIRM" -ge "$RESUME_CONFIRM" ]; then
                 OVERHEAT=0
                 TEMP_CONFIRM=0
+                SPK_COUNT=0
                 return 1
             fi
-            WARP_GUARD_REASON="复归确认中 ${TEMP_CONFIRM}/${RESUME_CONFIRM}（${snap}）"
+            WARP_GUARD_REASON="复归确认中 ${TEMP_CONFIRM}/${RESUME_CONFIRM}（累计，尖刺=${SPK_COUNT}｜${snap}）"
         else
-            TEMP_CONFIRM=0
             if [ "$any_hot" = "1" ]; then
+                # 撞熔断线：硬否定，立即清零（与旧行为一致，保守不变）
+                TEMP_CONFIRM=0
+                SPK_COUNT=0
                 WARP_GUARD_REASON="熔断持续（${snap}）"
             else
-                # 未越熔断线但仍在死区内（熔断线 > 温度 > 复归线）——状态保持熔断，不计数
-                WARP_GUARD_REASON="死区内待冷却（需 ≤${TRIP_RESUME_CPU}｜${snap}）"
+                # 未越熔断线但仍在死区内（熔断线 > 温度 > 复归线）——状态保持熔断。
+                # v1.4.10: 不再立即清零累计，改为计入尖刺计数；连续尖刺超容差才清零。
+                SPK_COUNT=$(( SPK_COUNT + 1 ))
+                if [ "$SPK_COUNT" -gt "$RESUME_SPIKE_TOLERANCE" ]; then
+                    TEMP_CONFIRM=0
+                    SPK_COUNT=0
+                    WARP_GUARD_REASON="死区内待冷却（连续尖刺超容差 ${RESUME_SPIKE_TOLERANCE}，累计已清零｜需 ≤${TRIP_RESUME_CPU}｜${snap}）"
+                else
+                    WARP_GUARD_REASON="死区内待冷却（累计 ${TEMP_CONFIRM}/${RESUME_CONFIRM} 保留｜尖刺=${SPK_COUNT}/${RESUME_SPIKE_TOLERANCE}｜${snap}）"
+                fi
             fi
         fi
         return 0
@@ -465,7 +511,9 @@ case "$1" in
         exit 0
         ;;
     restore)
-        restore_warp_charge
+        # @author bomo v1.4.10: 显式归因——CLI restore 由用户关磁贴/App 触发，
+        #   非过热熔断，故标 user（原实现会打印误导性的"来源=unknown"）。
+        restore_warp_charge "$RESTORE_SRC_USER"
         exit 0
         ;;
 esac
@@ -490,10 +538,50 @@ if [ -f "$LOCK_FILE" ]; then
 fi
 echo $$ > "$LOCK_FILE"
 
+# @author bomo v1.4.10（2026-09-16 实测复盘）：**cleanup 幂等化 + 退出互斥**，
+#   根治 trap 并发重入导致的多份 restore。
+#   实测证据（2026-09-16 00:11:18，设备日志）：
+#     `守护进程退出，恢复所有系统状态` × 4
+#     `已交还 cool_down 降流控制权`      × 4   ← 同一秒执行 4 次
+#   00:11:38 又出现 ×2，00:05:22 / 00:08:44 / 00:34:34 各 ×2。
+#   根因：`trap cleanup EXIT INT TERM` 把 3 个信号都指向同一函数，而 cleanup 内部
+#     最终 `exit 0` 会再次触发 EXIT trap；叠加外部并发信号（如 kill TERM + 进程
+#     自行退出）即造成重入。每次重入都完整跑一遍 restore_warp_charge：
+#       - 冗余 dumpsys horae testmode false / start ORMS（即使无害也是无效开销）
+#       - 与"旧实例 trap 把 WARP restore 掉"的经典事故同源（热更时曾踩坑）
+#   修法：① RESTORE_DONE 幂等标志——restore 只允许执行一次，重入直接返回；
+#         ② 独立锁文件做退出互斥（与启动锁分离，避免与"防重复启动"互相干扰）。
+#   ★ 保守原则：标志只在**真正执行完 restore 之后**置位；任何提前 return 都不置位，
+#     确保不会因为竞态而漏掉一次必要的系统状态还原（宁可多还原一次，不可少还原）。
+#   ⚠ 2026-09-16 单测发现的坑（勿回退）：初版在"抢锁失败"分支里就置了 RESTORE_DONE=1，
+#     单测用例3 直接抓到 —— 抢锁失败者既不复位标志也不执行还原，等锁释放后再调
+#     cleanup 会被标志挡住 ⇒ **restore 永远不会执行**，系统状态（ORMS 已停 /
+#     horae 仍在 testmode）静默卡住。修法见下：抢锁失败**不置位** RESTORE_DONE。
+RESTORE_DONE=0
+RESTORE_LOCK="$TMP_DIR/warp_restore.lock"
+
 cleanup() {
+    # 幂等守卫：本进程已还原完则直接退出（防 trap 重入）
+    if [ "$RESTORE_DONE" = "1" ]; then
+        return 0
+    fi
+    # 退出互斥：同一时刻只允许一个 cleanup 进入还原流程
+    # （mkdir 原子性优于 test-then-create，避免 TOCTOU）
+    # ★ 抢锁失败时不置 RESTORE_DONE —— 保留后续重试的机会，避免"静默漏还原"。
+    if ! mkdir "$RESTORE_LOCK.d" 2>/dev/null; then
+        return 0
+    fi
+    RESTORE_DONE=1
+
     _log "守护进程退出，恢复所有系统状态"
-    restore_warp_charge
-    rm -f "$LOCK_FILE" "$FILTERED_LIST"
+    # @author bomo v1.4.10: 显式传归因，避免"来源=unknown"（见 restore_warp_charge 注释）
+    restore_warp_charge "$RESTORE_SRC_SHUTDOWN"
+    rm -f "$FILTERED_LIST"
+    rmdir "$RESTORE_LOCK.d" 2>/dev/null
+    # 仅当确是本进程持锁时才清理锁文件（避免误删后继实例的锁）
+    if [ -f "$LOCK_FILE" ] && [ "$(cat "$LOCK_FILE" 2>/dev/null)" = "$$" ]; then
+        rm -f "$LOCK_FILE"
+    fi
     exit 0
 }
 trap cleanup EXIT INT TERM
@@ -532,9 +620,19 @@ PREV_CHARGING=0
 WARP_ACTIVE=0
 # @author bomo v1.4.3: 滞回状态机与日志计数初始化
 OVERHEAT=0            # 1 = 处于过热暂停（滞回死区内不恢复）
-TEMP_CONFIRM=0        # 恢复线以下连续采样计数
+# @author bomo v1.4.10: TEMP_CONFIRM 语义由「连续达标次数」改为「**累计**达标次数」，
+#   并新增 SPK_COUNT（连续尖刺计数）。原因见 RESUME_CONFIRM 参数处实测证据：
+#   原「连续」语义下分子恒为 1，3/3 从未达成。
+TEMP_CONFIRM=0        # 复归达标**累计**计数（v1.4.10 起非连续）
+SPK_COUNT=0           # 死区内连续尖刺计数（超 RESUME_SPIKE_TOLERANCE 则清零累计）
 WARP_GUARD_SRC=""     # @author bomo v1.4.5: 过热来源（cpu/gpu/battery/shell），决定是否交还 cool_down
                       # v1.4.7: 新增 gpu / shell 两种来源（四传感器熔断）
+                      # @author bomo v1.4.10: 新增 exit 归因——守护退出/用户关闭时
+                      #   并非过热熔断，此时 SRC 为空会打印"来源=unknown"。
+                      #   现由 restore_warp_charge 的 caller 标注（见 RESTORE_SRC_*）。
+RESTORE_SRC_OVERHEAT="overheat"   # 由温度熔断触发
+RESTORE_SRC_SHUTDOWN="shutdown"   # 守护退出（信号/正常收尾）
+RESTORE_SRC_USER="user"           # 用户热开关关闭 / 断充
 PAUSE_SINCE=0         # 本次过热暂停起始时间戳（秒），0=未暂停
 TOGGLE_HOUR=""        # 切换计数所在小时
 TOGGLE_COUNT=0        # 该小时内 暂停/恢复 切换次数
@@ -558,7 +656,8 @@ while true; do
         # 响应"路径，8 秒内生效（否则要等 64s 周期重应用）。
         if ! is_user_enabled; then
             if [ "$WARP_ACTIVE" = "1" ]; then
-                restore_warp_charge
+                # @author bomo v1.4.10: 显式归因 user（原实现打印"来源=unknown"）
+                restore_warp_charge "$RESTORE_SRC_USER"
             fi
             _log_status "user_off" "亮屏快充已由用户关闭（充电中仍持续待命）"
             loop_count=$(( loop_count + 1 ))
@@ -589,8 +688,10 @@ while true; do
             if [ "$WARP_ACTIVE" = "1" ]; then
                 # @author bomo v1.4.7: 熔断 = **完全交还系统**（保险丝语义，不做分级折中）。
                 # 历史：v1.4.5 曾对 CPU 过热传 cpu_hot 保持 cool_down=0（治 15W 事故），
-                # 但用户最终拍板"熔断即完全交还"，故统一为无参调用。
-                restore_warp_charge
+                # 但用户最终拍板"熔断即完全交还"，故统一为无参数值分级。
+                # @author bomo v1.4.10: 显式传熔断来源（cpu/gpu/battery/shell），
+                #   而非依赖全局残留值——与 RESTORE_SRC_* 语义标注区分开。
+                restore_warp_charge "${WARP_GUARD_SRC:-$RESTORE_SRC_OVERHEAT}"
                 PAUSE_SINCE=$(date +%s)
                 count_toggle
                 _log "⚠ 安全熔断：${WARP_GUARD_REASON}，亮屏快充已交给系统接管（来源=${WARP_GUARD_SRC}｜本小时第 ${TOGGLE_COUNT} 次切换｜游戏=${GAME_ACTIVE}）"
@@ -627,7 +728,8 @@ while true; do
         if [ "$PREV_CHARGING" = "1" ]; then
             PREV_CHARGING=0
             _log "充电断开"
-            restore_warp_charge
+            # @author bomo v1.4.10: 显式归因 user（断充属"启用条件消失"，非过热熔断）
+            restore_warp_charge "$RESTORE_SRC_USER"
             _log "[亮屏快充] 已恢复（充电断开）"
         fi
         if [ "$GAME_ACTIVE" = "1" ]; then
